@@ -1,0 +1,545 @@
+// attendance UI/client/src/pages/Worker/WorkerLogin.jsx
+
+import { useState, useEffect, useCallback, useContext, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import {
+  FaSearch,
+  FaChevronLeft,
+  FaChevronRight
+} from 'react-icons/fa';
+import { IoMdRefresh } from "react-icons/io";
+import { useAuth } from '../../hooks/useAuth';
+import { getPublicWorkers } from '../../services/workerService';
+import Spinner from '../../components/common/Spinner';
+import appContext from '../../context/AppContext';
+import Modal from '../../components/common/Modal'; // Add this line
+import Button from '../../components/common/Button';
+
+const WorkerLogin = () => {
+  const [showWrongSubdomainModal, setShowWrongSubdomainModal] = useState(false);
+  const [workers, setWorkers] = useState([]);
+  const [filteredWorkers, setFilteredWorkers] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingWorkers, setIsLoadingWorkers] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [department, setDepartment] = useState('All');
+  const [manualSubdomain, setManualSubdomain] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const manualSubdomainInputRef = useRef(null);
+
+  const navigate = useNavigate();
+  const { login } = useAuth();
+  const { subdomain, setSubdomain } = useContext(appContext);
+
+  const workersPerPage = 12;
+  const totalWorkers = filteredWorkers.length;
+  const totalPages = Math.ceil(totalWorkers / workersPerPage);
+
+  // Handle subdomain submission
+  const handleSubdomainSubmit = (e) => {
+    e.preventDefault();
+    if (!manualSubdomain.trim()) {
+      toast.error('Please enter a subdomain.');
+      return;
+    }
+    // Set 'main' as a fallback if manualSubdomain is empty/whitespace
+    localStorage.setItem('tasktracker-subdomain', manualSubdomain.trim() || 'main');
+    setSubdomain(manualSubdomain.trim() || 'main');
+  };
+
+  const loadWorkers = useCallback(async () => {
+    // Keep this check to prevent unnecessary API calls if subdomain is already 'main'
+    if (!subdomain || subdomain === 'main') {
+      setIsLoadingWorkers(false);
+      return;
+    }
+
+    try {
+      setIsLoadingWorkers(true);
+      const workersData = await getPublicWorkers({ subdomain });
+
+      // MODIFIED BLOCK: Ensure the modal is shown when no workers are found for the subdomain
+      if (!Array.isArray(workersData) || workersData.length === 0) {
+        setShowWrongSubdomainModal(true); // Directly show the modal
+        setWorkers([]); // Clear any previous worker data
+        setFilteredWorkers([]);
+        setSelectedWorker(null);
+        // Do NOT reset subdomain here. The 'Re-enter Company Name' button in the modal will handle this.
+        return; // Exit the function to prevent further processing of empty data
+      }
+
+      setWorkers(workersData); // Only set workers if data is valid
+    } catch (error) {
+      console.error('Employee load error:', error);
+      // If there's an API error, it could also mean a wrong subdomain or server issue.
+      // Show the modal in this case too, or handle specifically if you prefer a different error message.
+      setShowWrongSubdomainModal(true); // Consider showing the modal for fetch errors too
+      setWorkers([]); // Clear data on error
+      setFilteredWorkers([]);
+      setSelectedWorker(null);
+      // toast.error('Failed to load employees. Please try again later.'); // Optional: keep toast for network/server errors
+    } finally {
+      setIsLoadingWorkers(false);
+    }
+  }, [subdomain, setSubdomain]);
+
+  useEffect(() => {
+    loadWorkers();
+  }, [loadWorkers, subdomain]); // Keep subdomain as a dependency to react to its changes
+
+  useEffect(() => {
+    if ((!subdomain || subdomain === 'main') && manualSubdomainInputRef.current) {
+      manualSubdomainInputRef.current.focus();
+    }
+  }, [subdomain]);
+
+  // Filter workers
+  useEffect(() => {
+    const filtered = workers.filter(worker => {
+      const matchesSearch = !searchTerm ||
+        worker.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (worker.department && worker.department.toLowerCase().includes(searchTerm.toLowerCase()));
+
+      const matchesDepartment = department === 'All' ||
+        worker.department === department;
+
+      return matchesSearch && matchesDepartment;
+    });
+
+    setFilteredWorkers(filtered);
+    setCurrentPage(1);
+  }, [workers, searchTerm, department]);
+
+  const paginatedWorkers = filteredWorkers.slice(
+    (currentPage - 1) * workersPerPage,
+    currentPage * workersPerPage
+  );
+
+  const departments = ['All', ...new Set(workers.map(w => w.department).filter(Boolean))];
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+
+    if (!selectedWorker || !password) {
+      toast.error('Please select a employee and enter password');
+      return;
+    }
+
+    if (!subdomain || subdomain === 'main') {
+      toast.error('Subdomain is missing, please enter your company name.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      // Authenticate worker with credentials and subdomain
+      await login({
+        username: selectedWorker.username,
+        password,
+        subdomain
+      }, 'worker');
+
+      toast.success(`Welcome, ${selectedWorker.name}!`);
+      navigate('/worker');
+    } catch (error) {
+      toast.error(error.message || 'Login failed. Check your credentials.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const renderPagination = () => {
+    if (totalPages <= 1) return null;
+
+    const pageNumbers = [];
+    const maxPagesToShow = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
+    let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+
+    if (endPage - startPage + 1 < maxPagesToShow) {
+      startPage = Math.max(1, endPage - maxPagesToShow + 1);
+    }
+
+    if (currentPage > 1) {
+      pageNumbers.push(
+        <button 
+          key="prev" 
+          onClick={() => setCurrentPage(currentPage - 1)} 
+          className="p-2 bg-white/80 text-blue-600 rounded-full hover:bg-white transition-colors shadow-sm"
+        >
+          <FaChevronLeft />
+        </button>
+      );
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      pageNumbers.push(
+        <button
+          key={i}
+          onClick={() => setCurrentPage(i)}
+          className={`w-9 h-9 rounded-full flex items-center justify-center ${
+            currentPage === i 
+              ? 'bg-blue-600 text-white' 
+              : 'bg-white/80 text-gray-700 hover:bg-white'
+          } transition-colors shadow-sm`}
+        >
+          {i}
+        </button>
+      );
+    }
+
+    if (currentPage < totalPages) {
+      pageNumbers.push(
+        <button 
+          key="next" 
+          onClick={() => setCurrentPage(currentPage + 1)} 
+          className="p-2 bg-white/80 text-blue-600 rounded-full hover:bg-white transition-colors shadow-sm"
+        >
+          <FaChevronRight />
+        </button>
+      );
+    }
+
+    return <div className="flex justify-center items-center space-x-3 mt-8">{pageNumbers}</div>;
+  };
+
+  // Generate floating particles for background animation
+  const particles = Array.from({ length: 15 }, (_, i) => ({
+    id: i,
+    x: Math.random() * 100,
+    y: Math.random() * 100,
+    size: Math.random() * 3 + 1,
+    duration: Math.random() * 20 + 10,
+    delay: Math.random() * 5
+  }));
+
+  if (showWrongSubdomainModal) { // New condition: If the modal flag is true, only render the modal
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 text-gray-900 p-4 relative overflow-hidden">
+        {/* Animated Particles Background (optional, but good for consistent background) */}
+        {particles.map((particle) => (
+          <div
+            key={particle.id}
+            className="absolute rounded-full bg-blue-200"
+            style={{ 
+              left: `${particle.x}%`, 
+              top: `${particle.y}%`, 
+              width: `${particle.size}px`, 
+              height: `${particle.size}px`,
+              opacity: 0.1 + Math.random() * 0.2,
+              animation: `float ${particle.duration}s infinite ${particle.delay}s ease-in-out`
+            }}
+          />
+        ))}
+        {/* Wrong Subdomain Modal */}
+        <Modal
+          isOpen={showWrongSubdomainModal}
+          onClose={() => setShowWrongSubdomainModal(false)}
+          title="Company Name Not Found"
+        >
+          <div className="text-center p-4">
+            <p className="text-lg text-gray-700 mb-6">
+              The company name you entered was not found. Please check and try again.
+            </p>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setShowWrongSubdomainModal(false);
+                setSubdomain('main'); // Reset subdomain to show the input field again
+                localStorage.removeItem('tasktracker-subdomain'); // Clear from local storage
+                setManualSubdomain(''); // Clear the input field
+              }}
+            >
+              Re-enter Company Name
+            </Button>
+          </div>
+        </Modal>
+      </div>
+    );
+  }
+
+  // Original return statement logic for subdomain input form
+  if (!subdomain || subdomain === 'main') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 text-gray-900 p-4 relative overflow-hidden">
+        {/* Animated Particles Background */}
+        {particles.map((particle) => (
+          <div
+            key={particle.id}
+            className="absolute rounded-full bg-blue-200"
+            style={{ 
+              left: `${particle.x}%`, 
+              top: `${particle.y}%`, 
+              width: `${particle.size}px`, 
+              height: `${particle.size}px`,
+              opacity: 0.1 + Math.random() * 0.2,
+              animation: `float ${particle.duration}s infinite ${particle.delay}s ease-in-out`
+            }}
+          />
+        ))}
+        
+        {/* Gradient Orbs */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-200 rounded-full blur-3xl transform translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-purple-200 rounded-full blur-3xl transform -translate-x-1/2 translate-y-1/2 pointer-events-none"></div>
+        
+        <div className="w-[90%] max-w-md z-10 bg-white/80 backdrop-blur-xl rounded-2xl p-8 shadow-lg border border-gray-200 mx-auto glass-effect">
+          <div className="mb-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mx-auto mb-4 shadow-md">
+              <span className="text-white font-bold text-xl">TT</span>
+            </div>
+            
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
+              Enter Your Company Name
+            </h1>
+            <p className="text-gray-500 mt-2">
+              Please enter your company's domain to continue
+            </p>
+          </div>
+
+          <form onSubmit={handleSubdomainSubmit} className="space-y-5">
+            <div>
+              <label className="text-gray-700 text-sm font-medium mb-2 block">Company Domain</label>
+              <input
+                ref={manualSubdomainInputRef} 
+                placeholder="e.g. company123"
+                value={manualSubdomain}
+                onChange={(e) => setManualSubdomain(e.target.value)}
+                className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-800 shadow-sm"
+                required
+              />
+            </div>
+            
+            <button
+              type="submit"
+              className="w-full py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all shadow-md font-medium transform hover:scale-105 active:scale-95"
+            >
+              Continue
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // Main Worker Login UI (This part remains unchanged from previous responses for clarity,
+  // as the request specifically asked for modifications to the 'if (!subdomain || subdomain === "main")' block.)
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 text-gray-900 p-4 relative overflow-hidden">
+      {/* Animated Particles */}
+      {particles.map((particle) => (
+        <div
+          key={particle.id}
+          className="absolute rounded-full bg-blue-200"
+          style={{ 
+            left: `${particle.x}%`, 
+            top: `${particle.y}%`, 
+            width: `${particle.size}px`, 
+            height: `${particle.size}px`,
+            opacity: 0.1 + Math.random() * 0.2,
+            animation: `float ${particle.duration}s infinite ${particle.delay}s ease-in-out`
+          }}
+        />
+      ))}
+      
+      {/* Gradient Orbs */}
+      <div className="absolute top-0 right-0 w-96 h-96 bg-blue-200 rounded-full blur-3xl transform translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+      <div className="absolute bottom-0 left-0 w-96 h-96 bg-purple-200 rounded-full blur-3xl transform -translate-x-1/2 translate-y-1/2 pointer-events-none"></div>
+      
+      <div className="container mx-auto relative z-10">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+          <h1 className="text-3xl font-bold text-gray-800">
+            Employee Login
+          </h1>
+
+          <button
+            onClick={() => {
+              setSubdomain('main'); // Set subdomain to 'main'
+              localStorage.removeItem('tasktracker-subdomain'); // Clear from local storage
+              setWorkers([]); // Clear workers to ensure the company input shows
+              setFilteredWorkers([]);
+              setSelectedWorker(null);
+              setSearchTerm('');
+              setPassword('');
+              setCurrentPage(1);
+              setDepartment('All');
+            }}
+            className="px-4 py-2 bg-white/60 border border-gray-300 text-blue-600 rounded-xl hover:bg-white transition-colors flex items-center gap-2 text-sm shadow-sm self-start md:self-auto"
+          >
+            Change Company <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+            </svg>
+
+          </button>
+
+          <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto mt-4 md:mt-0">
+            <div className="relative flex-grow">
+              <input
+                type="text"
+                placeholder="Search employees..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-800 shadow-sm"
+              />
+              <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-blue-500" />
+            </div>
+
+            <select
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="px-4 py-3 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-800 shadow-sm"
+            >
+              {departments.map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {isLoadingWorkers ? (
+          <div className="flex justify-center items-center h-96">
+            <Spinner size="lg" className="text-blue-500" />
+          </div>
+        ) : (filteredWorkers.length === 0 && (subdomain && subdomain !== 'main')) ? (
+          <div className="text-center py-16 text-gray-500">
+            No employees found for {subdomain}. Try adjusting your search or filter.
+            <button
+              className='block mx-auto bg-white/60 border border-gray-300 p-3 my-3 rounded-full text-blue-600 shadow-sm hover:bg-white transition-colors'
+              onClick={loadWorkers}
+            >
+              <IoMdRefresh />
+            </button>
+          </div>
+        ) : filteredWorkers.length === 0 ? ( 
+          null 
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {paginatedWorkers.map((worker) => (
+                <div
+                  key={worker._id}
+                  onClick={() => setSelectedWorker(worker)}
+                  className={`cursor-pointer p-4 rounded-xl text-center transition-all ${
+                    selectedWorker?._id === worker._id
+                      ? 'bg-white border-2 border-blue-500 shadow-lg'
+                      : 'bg-white border border-gray-200 hover:border-blue-300'
+                  } shadow-sm`}
+                >
+                  <div className="w-20 h-20 rounded-full mx-auto mb-3 overflow-hidden border-2 border-blue-200">
+                    <img
+                      src={
+                        worker.photo
+                          ? worker.photo
+                          : `https://ui-avatars.com/api/?name=${encodeURIComponent(worker.name)}&background=3b82f6&color=fff`
+                      }
+                      alt="Employee"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+
+                  <h3 className="font-medium truncate text-gray-800">{worker.name}</h3>
+                  <p className="text-xs text-blue-600 truncate">{worker.department}</p>
+                </div>
+              ))}
+            </div>
+
+            {renderPagination()}
+          </>
+        )}
+
+        {/* Worker Login Modal */}
+        {selectedWorker && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 w-full max-w-md shadow-xl">
+              <div className="flex items-center mb-6">
+                <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-blue-200 mr-4">
+                  <img
+                    src={
+                      selectedWorker.photo
+                        ? selectedWorker.photo
+                        : `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedWorker.name)}&background=3b82f6&color=fff`
+                    }
+                    alt="Employee"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-800">{selectedWorker.name}</h2>
+                  <p className="text-blue-600">{selectedWorker.department}</p>
+                </div>
+                <button
+                  onClick={() => setSelectedWorker(null)}
+                  className="ml-auto text-gray-500 hover:text-gray-700 focus:outline-none rounded-full w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleLogin} className="space-y-5">
+                <div className="form-group relative">
+                  <label htmlFor="password" className="text-gray-700 flex items-center text-sm font-medium mb-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                    </svg>
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      id="password"
+                      name="password"
+                      className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-800 pr-10 shadow-sm"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd" />
+                          <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                          <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all shadow-md font-medium transform hover:scale-105 active:scale-95"
+                >
+                  {isLoading ? (
+                    <span className="flex items-center justify-center">
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Signing In...
+                    </span>
+                  ) : 'Sign In'}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default WorkerLogin;
