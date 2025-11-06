@@ -16,7 +16,10 @@ import {
     FiClock,
     FiMapPin,
     FiCrosshair,
-    FiLock
+    FiLock,
+    FiUsers,
+    FiCheckSquare,
+    FiSquare
 } from 'react-icons/fi';
 import Button from '../common/Button';
 import Card from '../common/Card';
@@ -24,12 +27,16 @@ import Spinner from '../common/Spinner';
 import appContext from '../../context/AppContext';
 import api from '../../services/api';
 import { getAuthToken } from '../../utils/authUtils';
+import { getWorkers } from '../../services/workerService';
 
 const Settings = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [hasChanges, setHasChanges] = useState(false);
     const [currentLocation, setCurrentLocation] = useState(null); // State for current location
+    const [workers, setWorkers] = useState([]); // State for all workers
+    const [searchTerm, setSearchTerm] = useState(''); // State for worker search
+    const [showEmployeeDropdown, setShowEmployeeDropdown] = useState(false); // State for employee dropdown visibility
 
     const { subdomain } = useContext(appContext);
 
@@ -57,6 +64,13 @@ const Settings = () => {
         deductSalary: true,
         permissionTimeMinutes: 15,
         salaryDeductionPerBreak: 10,
+
+        // Auto punch-out settings
+        autoPunchOut: {
+            isEnabled: false,
+            outTime: '23:00', // 11:00 PM
+            selectedWorkers: []
+        },
 
         // Location settings
         attendanceLocation: {
@@ -113,6 +127,18 @@ const Settings = () => {
         setHasChanges(changed);
     };
 
+    // Fetch workers from API
+    const fetchWorkers = async () => {
+        try {
+            const workersData = await getWorkers({ subdomain });
+            setWorkers(Array.isArray(workersData) ? workersData : []);
+        } catch (error) {
+            console.error('Error fetching workers:', error);
+            toast.error('Failed to fetch workers. Please try again.');
+            setWorkers([]);
+        }
+    };
+
     // Fetch settings from API
     const fetchSettings = async () => {
         if (!subdomain || subdomain === 'main') {
@@ -137,6 +163,13 @@ const Settings = () => {
                 deductSalary: fetchedSettings.deductSalary !== undefined ? fetchedSettings.deductSalary : true,
                 permissionTimeMinutes: fetchedSettings.permissionTimeMinutes || 15,
                 salaryDeductionPerBreak: fetchedSettings.salaryDeductionPerBreak || 10,
+
+                // Auto punch-out settings
+                autoPunchOut: fetchedSettings.autoPunchOut || {
+                    isEnabled: false,
+                    outTime: '23:00',
+                    selectedWorkers: []
+                },
 
                 // Location settings
                 attendanceLocation: fetchedSettings.attendanceLocation || {
@@ -169,6 +202,11 @@ const Settings = () => {
                 deductSalary: fetchedSettings.deductSalary !== undefined ? fetchedSettings.deductSalary : true,
                 permissionTimeMinutes: fetchedSettings.permissionTimeMinutes || 15,
                 salaryDeductionPerBreak: fetchedSettings.salaryDeductionPerBreak || 10,
+                autoPunchOut: fetchedSettings.autoPunchOut || {
+                    isEnabled: false,
+                    outTime: '23:00',
+                    selectedWorkers: []
+                },
                 attendanceLocation: fetchedSettings.attendanceLocation || {
                     enabled: false,
                     latitude: 0,
@@ -210,6 +248,62 @@ const Settings = () => {
 
         setSettings(updatedSettings);
         checkForChanges(updatedSettings);
+    };
+
+    // Handle auto punch-out settings changes
+    const handleAutoPunchOutChange = (field, value) => {
+        setSettings(prevSettings => {
+            const updatedSettings = {
+                ...prevSettings,
+                autoPunchOut: {
+                    ...prevSettings.autoPunchOut,
+                    [field]: value
+                }
+            };
+            
+            checkForChanges(updatedSettings);
+            return updatedSettings;
+        });
+    };
+
+    // Handle worker selection for auto punch-out
+    const handleWorkerSelection = (workerId) => {
+        setSettings(prevSettings => {
+            const isSelected = prevSettings.autoPunchOut.selectedWorkers.includes(workerId);
+            const updatedSelectedWorkers = isSelected
+                ? prevSettings.autoPunchOut.selectedWorkers.filter(id => id !== workerId)
+                : [...prevSettings.autoPunchOut.selectedWorkers, workerId];
+            
+            const updatedSettings = {
+                ...prevSettings,
+                autoPunchOut: {
+                    ...prevSettings.autoPunchOut,
+                    selectedWorkers: updatedSelectedWorkers
+                }
+            };
+            
+            checkForChanges(updatedSettings);
+            return updatedSettings;
+        });
+    };
+
+    // Handle select all workers for auto punch-out
+    const handleSelectAllWorkers = () => {
+        setSettings(prevSettings => {
+            const allWorkerIds = workers.map(worker => worker._id);
+            const isSelectedAll = prevSettings.autoPunchOut.selectedWorkers.length === workers.length;
+            
+            const updatedSettings = {
+                ...prevSettings,
+                autoPunchOut: {
+                    ...prevSettings.autoPunchOut,
+                    selectedWorkers: isSelectedAll ? [] : allWorkerIds
+                }
+            };
+            
+            checkForChanges(updatedSettings);
+            return updatedSettings;
+        });
     };
 
     // Handle location settings changes
@@ -416,9 +510,17 @@ const Settings = () => {
         </button>
     );
 
+    // Filter workers based on search term
+    const filteredWorkers = workers.filter(worker =>
+        worker.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        worker.rfid.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (worker.department && worker.department.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+
     useEffect(() => {
         if (subdomain && subdomain !== 'main') {
             fetchSettings();
+            fetchWorkers();
         } else {
             setLoading(false);
         }
@@ -493,6 +595,171 @@ const Settings = () => {
                         </div>
                     )}
                 </div>
+
+                {/* Auto Punch-Out Settings */}
+                <Card className="mb-8 hover:shadow-lg transition-shadow duration-200">
+                    <div className="h-2 bg-gradient-to-r from-red-400 to-pink-400" />
+                    <div className="p-6">
+                        <h3 className="text-lg font-semibold mb-6 flex items-center text-gray-900">
+                            <div className="p-2 bg-red-100 rounded-lg mr-3">
+                                <FiUsers className="h-5 w-5 text-red-600" />
+                            </div>
+                            Auto Punch-Out Settings
+                        </h3>
+
+                        <div className="space-y-6">
+                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                                <div>
+                                    <label className="text-sm font-medium text-gray-700">Enable Auto Punch-Out</label>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Automatically punch out selected employees at a specified time
+                                    </p>
+                                </div>
+                                <CustomToggle
+                                    checked={settings.autoPunchOut.isEnabled}
+                                    onChange={() => handleAutoPunchOutChange('isEnabled', !settings.autoPunchOut.isEnabled)}
+                                />
+                            </div>
+
+                            {settings.autoPunchOut.isEnabled && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <label className="block text-sm font-medium text-gray-700">
+                                            Auto Punch-Out Time
+                                        </label>
+                                        <input
+                                            type="time"
+                                            value={settings.autoPunchOut.outTime}
+                                            onChange={(e) => handleAutoPunchOutChange('outTime', e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500">
+                                            Time when selected employees will be automatically punched out
+                                        </p>
+                                    </div>
+
+                                    <div className="md:col-span-2">
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Select Employees for Auto Punch-Out
+                                        </label>
+                                        
+                                        {/* Dropdown toggle button */}
+                                        <div className="mb-4">
+                                            <button
+                                                onClick={() => setShowEmployeeDropdown(!showEmployeeDropdown)}
+                                                className="w-full flex justify-between items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                            >
+                                                <span>
+                                                    {settings.autoPunchOut.selectedWorkers.length > 0 
+                                                        ? `${settings.autoPunchOut.selectedWorkers.length} employee(s) selected` 
+                                                        : 'Select employees...'}
+                                                </span>
+                                                <svg className={`ml-2 h-5 w-5 transform ${showEmployeeDropdown ? 'rotate-180' : ''}`} 
+                                                     xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                                </svg>
+                                            </button>
+                                        </div>
+
+                                        {/* Employee selection dropdown - only shown when toggled */}
+                                        {showEmployeeDropdown && (
+                                            <div className="border border-gray-200 rounded-lg shadow-lg bg-white">
+                                                {/* Search and Select All */}
+                                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3 border-b border-gray-200">
+                                                    <div className="flex-1">
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Search employees..."
+                                                            value={searchTerm}
+                                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                                        />
+                                                    </div>
+                                                    <Button
+                                                        onClick={handleSelectAllWorkers}
+                                                        variant="secondary"
+                                                        className="flex items-center whitespace-nowrap"
+                                                    >
+                                                        {settings.autoPunchOut.selectedWorkers.length === workers.length ? (
+                                                            <>
+                                                                <FiSquare className="mr-2" />
+                                                                Deselect All
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <FiCheckSquare className="mr-2" />
+                                                                Select All
+                                                            </>
+                                                        )}
+                                                    </Button>
+                                                </div>
+
+                                                {/* Workers List - Limited height with vertical scroll */}
+                                                <div className="max-h-60 overflow-y-auto">
+                                                    {filteredWorkers.length > 0 ? (
+                                                        <ul className="divide-y divide-gray-200">
+                                                            {filteredWorkers.map((worker) => (
+                                                                <li key={worker._id} className="p-3 hover:bg-gray-50">
+                                                                    <div className="flex items-center">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            id={`worker-${worker._id}`}
+                                                                            checked={settings.autoPunchOut.selectedWorkers.includes(worker._id)}
+                                                                            onChange={() => handleWorkerSelection(worker._id)}
+                                                                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                                                        />
+                                                                        <label 
+                                                                            htmlFor={`worker-${worker._id}`} 
+                                                                            className="ml-3 flex items-center cursor-pointer"
+                                                                        >
+                                                                            {worker.photo ? (
+                                                                                <img 
+                                                                                    src={worker.photo} 
+                                                                                    alt={worker.name} 
+                                                                                    className="h-8 w-8 rounded-full object-cover mr-3"
+                                                                                />
+                                                                            ) : (
+                                                                                <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center mr-3">
+                                                                                    <span className="text-xs font-medium text-gray-600">
+                                                                                        {worker.name.charAt(0)}
+                                                                                    </span>
+                                                                                </div>
+                                                                            )}
+                                                                            <div>
+                                                                                <p className="text-sm font-medium text-gray-900">{worker.name}</p>
+                                                                                <p className="text-xs text-gray-500">
+                                                                                    {worker.rfid} • {worker.department || 'No Department'}
+                                                                                </p>
+                                                                            </div>
+                                                                        </label>
+                                                                    </div>
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    ) : (
+                                                        <div className="p-6 text-center">
+                                                            <p className="text-gray-500">
+                                                                {workers.length === 0 
+                                                                    ? 'No employees found. Please add employees first.' 
+                                                                    : 'No employees match your search.'}
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                
+                                                <div className="p-3 bg-gray-50 border-t border-gray-200">
+                                                    <p className="text-xs text-gray-500 text-center">
+                                                        {settings.autoPunchOut.selectedWorkers.length} of {workers.length} employees selected
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </Card>
 
                 {/* Additional Settings Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">

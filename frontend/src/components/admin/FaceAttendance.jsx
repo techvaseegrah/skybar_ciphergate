@@ -9,6 +9,7 @@ import { getWorkers, getWorkerById } from '../../services/workerService';
 import { putAttendance, getWorkerLastAttendance } from '../../services/attendanceService';
 import { getCurrentPosition, isWorkerInAllowedLocation } from '../../services/geolocationService';
 import { useAuth } from '../../hooks/useAuth'; // Import useAuth hook
+import { FaCamera, FaSyncAlt } from 'react-icons/fa'; // Added camera icon for switch button
 
 const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, currentWorker = null }) => {
   const webcamRef = useRef(null);
@@ -26,6 +27,9 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
   const [currentLocation, setCurrentLocation] = useState(null); // State for current location
   const [cooldownWorkers, setCooldownWorkers] = useState({}); // Track cooldown for workers
   const { user } = useAuth(); // Get current user
+  
+  // Camera facing mode state
+  const [facingMode, setFacingMode] = useState('user'); // 'user' for front camera, 'environment' for back camera
 
   // Load face detection models
   useEffect(() => {
@@ -546,6 +550,11 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
     };
   }, [isOpen, isModelLoaded, showConfirmation, isProcessing]);
 
+  // Function to switch camera
+  const switchCamera = () => {
+    setFacingMode(prevMode => prevMode === 'user' ? 'environment' : 'user');
+  };
+
   return (
     <>
       <Modal
@@ -624,7 +633,7 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
                   ref={webcamRef}
                   screenshotFormat="image/jpeg"
                   videoConstraints={{ 
-                    facingMode: 'user',
+                    facingMode: facingMode, // Use dynamic facing mode
                     width: { ideal: 640 },
                     height: { ideal: 480 },
                     frameRate: { ideal: 30, min: 15 }
@@ -632,6 +641,17 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
                   className="w-full rounded-lg"
                 />
                 <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
+                
+                {/* Camera Switch Button - Only show on mobile devices */}
+                <div className="absolute top-4 right-4">
+                  <button
+                    onClick={switchCamera}
+                    className="bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-75 transition-all duration-200 flex items-center justify-center"
+                    aria-label="Switch camera"
+                  >
+                    <FaSyncAlt className="text-lg" />
+                  </button>
+                </div>
               </div>
 
               <div className="text-center mb-4">
@@ -640,6 +660,10 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
                 </div>
                 <p className="text-sm text-gray-600 mt-2">
                   {isProcessing ? 'Recognizing face...' : 'Position your face within the circular frame'}
+                </p>
+                {/* Camera Mode Indicator */}
+                <p className="text-xs text-gray-500 mt-1">
+                  Using {facingMode === 'user' ? 'Front' : 'Back'} Camera
                 </p>
               </div>
 

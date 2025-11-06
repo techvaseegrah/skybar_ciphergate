@@ -1,6 +1,6 @@
 import { useContext, useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { FaBars, FaTimes, FaChevronDown, FaChevronRight } from 'react-icons/fa';
+import { FaBars, FaTimes, FaChevronDown, FaChevronRight, FaChevronLeft } from 'react-icons/fa';
 import { FiLogOut } from "react-icons/fi";
 import appContext from '../../context/AppContext';
 
@@ -112,6 +112,18 @@ const Sidebar = ({
         )}
       </button>
 
+      {/* Close sidebar button - always visible outside the sidebar when open */}
+      {isOpen && (
+        <button
+          type="button"
+          className="md:hidden fixed top-4 right-4 z-50 p-2 rounded-xl text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-gray-300 transition-all duration-200 backdrop-blur-sm bg-white/80 shadow-sm"
+          onClick={closeSidebar}
+        >
+          <span className="sr-only">Close sidebar</span>
+          <FaTimes className="h-5 w-5" />
+        </button>
+      )}
+
       {/* Sidebar Backdrop */}
       <div 
         className={`fixed inset-0 z-40 transition-opacity duration-300 ease-in-out md:hidden ${
@@ -126,7 +138,7 @@ const Sidebar = ({
           isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         } rounded-r-2xl`}
       >
-        {/* Logo and close button */}
+        {/* Logo - no close button inside sidebar anymore */}
         <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200/50">
           <div className="flex items-center">
             <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-sm">
@@ -136,14 +148,7 @@ const Sidebar = ({
               <span className="ml-3 text-lg font-semibold text-gray-800 truncate">Sharu Recreation Club</span>
             )}
           </div>
-          <button
-            type="button"
-            className="md:hidden p-1 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-gray-300 transition-colors duration-200"
-            onClick={toggleSidebar}
-          >
-            <span className="sr-only">Close sidebar</span>
-            <FaTimes className="h-5 w-5" />
-          </button>
+          {/* Removed the close button from inside the sidebar */}
         </div>
 
         {/* User profile */}

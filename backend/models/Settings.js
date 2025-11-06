@@ -38,6 +38,22 @@ const settingsSchema = mongoose.Schema({
     default: 10
   },
 
+  // Auto punch-out settings
+  autoPunchOut: {
+    isEnabled: {
+      type: Boolean,
+      default: false
+    },
+    outTime: {
+      type: String,
+      default: '23:00' // 11:00 PM
+    },
+    selectedWorkers: {
+      type: [String], // Array of worker IDs
+      default: []
+    }
+  },
+
   // Location settings for attendance restrictions
   attendanceLocation: {
     enabled: {

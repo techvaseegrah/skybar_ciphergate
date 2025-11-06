@@ -1,4 +1,5 @@
 const Settings = require('../models/Settings');
+const { scheduleAutoPunchOut } = require('../services/cronJobs');
 
 // @desc    Get settings
 // @route   GET /api/settings/:subdomain
@@ -145,6 +146,15 @@ const updateSettings = async (req, res) => {
       { $set: updateObject },
       { new: true, runValidators: true }
     );
+
+    // If auto punch-out settings were updated, reschedule the cron job
+    if (updateData.autoPunchOut) {
+      try {
+        await scheduleAutoPunchOut(subdomain);
+      } catch (scheduleError) {
+        console.error('Error scheduling auto punch-out job:', scheduleError);
+      }
+    }
 
     res.json(updatedSettings);
   } catch (error) {

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { toast } from 'react-toastify';
-import { FaMoneyBillWave, FaHistory, FaChevronDown, FaChevronRight } from 'react-icons/fa';
+import { FaMoneyBillWave, FaHistory, FaChevronDown, FaChevronRight, FaTrash } from 'react-icons/fa';
 import { getWorkers } from '../../services/workerService';
-import { createAdvanceVoucher, getWorkerAdvances, getAdvanceVouchers } from '../../services/advanceService';
+import { createAdvanceVoucher, getWorkerAdvances, getAdvanceVouchers, deleteAdvanceVoucher } from '../../services/advanceService';
 import Card from '../common/Card';
 import Button from '../common/Button';
 import Table from '../common/Table';
@@ -24,6 +24,8 @@ const AdvanceManagement = () => {
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isGlobalHistoryModalOpen, setIsGlobalHistoryModalOpen] = useState(false);
     const [isWorkerAdvancesModalOpen, setIsWorkerAdvancesModalOpen] = useState(false);
+    const [isDeleteConfirmModalOpen, setIsDeleteConfirmModalOpen] = useState(false);
+    const [advanceToDelete, setAdvanceToDelete] = useState(null);
     const [selectedWorker, setSelectedWorker] = useState(null);
     const [workerAdvances, setWorkerAdvances] = useState([]);
     const [allAdvances, setAllAdvances] = useState([]);
@@ -197,22 +199,9 @@ const AdvanceManagement = () => {
         }
     };
 
-    // Toggle row expansion
-    const toggleRowExpansion = (workerId) => {
-        setExpandedRows(prev => {
-            const newSet = new Set(prev);
-            if (newSet.has(workerId)) {
-                newSet.delete(workerId);
-            } else {
-                newSet.add(workerId);
-            }
-            return newSet;
-        });
-    };
-
-    // Process advances data to group by employee
+    // Process advances data for global history view
     const processAdvancesData = () => {
-        if (!Array.isArray(allAdvances) || allAdvances.length === 0) {
+        if (!Array.isArray(allAdvances)) {
             return [];
         }
 
@@ -293,83 +282,38 @@ const AdvanceManagement = () => {
         }
     };
 
-    // Table columns configuration
-    const columns = [
-        {
-            header: 'Name',
-            accessor: 'name',
-            render: (record) => (
-                <div className="flex items-center">
-                    {record?.photo && (
-                        <img
-                            src={record.photo
-                                ? record.photo
-                                : `https://ui-avatars.com/api/?name=${encodeURIComponent(record.name)}`}
-                            alt="Employee"
-                            className="w-8 h-8 rounded-full mr-2"
-                        />
-                    )}
-                    {record?.name || 'Unknown'}
-                </div>
-            )
-        },
-        {
-            header: 'Employee ID',
-            accessor: 'rfid'
-        },
-        {
-            header: 'Department',
-            accessor: 'department'
-        },
-        {
-            header: 'Base Salary',
-            accessor: 'salary',
-            render: (record) => record?.salary?.toFixed(2)
-        },
-        {
-            header: 'Final Salary',
-            accessor: 'finalSalary',
-            render: (record) => {
-                // Calculate final salary dynamically: base salary - pending advance
-                const workerAdvances = allAdvances.filter(advance => advance.worker?._id === record._id);
-                const pendingAdvance = workerAdvances.reduce((total, advance) => total + advance.remainingAmount, 0);
-                const finalSalary = record?.salary - pendingAdvance;
-                return `₹${finalSalary.toFixed(2)}`;
+    // Handle delete advance confirmation
+    const handleDeleteAdvance = async () => {
+        if (!advanceToDelete) return;
+
+        try {
+            await deleteAdvanceVoucher(advanceToDelete._id);
+            toast.success('Advance voucher deleted successfully');
+            
+            // Close confirmation modal
+            setIsDeleteConfirmModalOpen(false);
+            setAdvanceToDelete(null);
+            
+            // Refresh data
+            loadData();
+            
+            // If we're in the history modal, also refresh that data
+            if (isHistoryModalOpen && selectedWorker) {
+                const advances = await getWorkerAdvances(selectedWorker._id);
+                setWorkerAdvances(Array.isArray(advances) ? advances : []);
             }
-        },
-        {
-            header: 'Pending Advance',
-            accessor: 'pendingAdvance',
-            render: (record) => {
-                // Calculate total pending advance for this worker
-                const workerAdvances = allAdvances.filter(advance => advance.worker?._id === record._id);
-                const pendingAdvance = workerAdvances.reduce((total, advance) => total + advance.remainingAmount, 0);
-                return `₹${pendingAdvance.toFixed(2)}`;
-            }
-        },
-        {
-            header: 'Actions',
-            accessor: 'actions',
-            render: (worker) => (
-                <div className="flex space-x-2">
-                    <button
-                        onClick={() => openAdvanceModal(worker)}
-                        className="p-1 text-blue-600 hover:text-blue-800"
-                        title="Create Advance Voucher"
-                    >
-                        <FaMoneyBillWave className='text-xl' />
-                    </button>
-                    <button
-                        onClick={() => openHistoryModal(worker)}
-                        className="p-1 text-green-600 hover:text-green-800"
-                        title="View Advance History"
-                    >
-                        <FaHistory className='text-xl' />
-                    </button>
-                </div>
-            )
+        } catch (error) {
+            toast.error(error.message || 'Failed to delete advance voucher');
+            setIsDeleteConfirmModalOpen(false);
+            setAdvanceToDelete(null);
         }
-    ];
+    };
+
+    // Show delete confirmation modal
+    const showDeleteConfirm = (advance) => {
+        setAdvanceToDelete(advance);
+        setIsDeleteConfirmModalOpen(true);
+    };
 
     // History table columns
     const historyColumns = [
@@ -391,6 +335,19 @@ const AdvanceManagement = () => {
             header: 'Approved By',
             accessor: 'approvedBy',
             render: (record) => record.approvedBy?.name || 'Unknown'
+        },
+        {
+            header: 'Actions',
+            accessor: 'actions',
+            render: (record) => (
+                <button
+                    onClick={() => showDeleteConfirm(record)}
+                    className="p-1 text-red-600 hover:text-red-800"
+                    title="Delete Advance Voucher"
+                >
+                    <FaTrash className='text-xl' />
+                </button>
+            )
         }
     ];
 
@@ -446,6 +403,19 @@ const AdvanceManagement = () => {
         {
             header: 'Description',
             accessor: 'description'
+        },
+        {
+            header: 'Actions',
+            accessor: 'actions',
+            render: (record) => (
+                <button
+                    onClick={() => showDeleteConfirm(record)}
+                    className="p-1 text-red-600 hover:text-red-800"
+                    title="Delete Advance Voucher"
+                >
+                    <FaTrash className='text-xl' />
+                </button>
+            )
         }
     ];
 
@@ -476,29 +446,93 @@ const AdvanceManagement = () => {
                 </div>
             </div>
 
-            <Card>
-                <div className="mb-4">
-                    <input
-                        type="text"
-                        className="form-input"
-                        placeholder="Search by name, employee ID or department..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                </div>
+            {/* Search */}
+            <div className="mb-6">
+                <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Search by name, RF ID or department..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
+            </div>
 
-                {isLoading ? (
-                    <div className="flex justify-center py-8">
-                        <Spinner size="lg" />
-                    </div>
-                ) : (
-                    <Table
-                        columns={columns}
-                        data={filteredWorkers}
-                        noDataMessage="No employees found."
-                    />
-                )}
-            </Card>
+            {/* Loading spinner */}
+            {isLoading && (
+                <div className="flex justify-center my-8">
+                    <Spinner />
+                </div>
+            )}
+
+            {/* Workers table */}
+            {!isLoading && (
+                <Table
+                    columns={[
+                        {
+                            header: 'Name',
+                            accessor: 'name'
+                        },
+                        {
+                            header: 'RF ID',
+                            accessor: 'rfid'
+                        },
+                        {
+                            header: 'Department',
+                            accessor: 'department'
+                        },
+                        {
+                            header: 'Base Salary',
+                            accessor: 'salary',
+                            render: (record) => `₹${record?.salary?.toFixed(2) || '0.00'}`
+                        },
+                        {
+                            header: 'Final Salary',
+                            accessor: 'finalSalary',
+                            render: (record) => {
+                                // Calculate final salary by subtracting pending advances
+                                const workerAdvances = allAdvances.filter(advance => advance.worker?._id === record._id);
+                                const pendingAdvance = workerAdvances.reduce((total, advance) => total + advance.remainingAmount, 0);
+                                const finalSalary = record?.salary - pendingAdvance;
+                                return `₹${finalSalary.toFixed(2)}`;
+                            }
+                        },
+                        {
+                            header: 'Pending Advance',
+                            accessor: 'pendingAdvance',
+                            render: (record) => {
+                                // Calculate total pending advance for this worker
+                                const workerAdvances = allAdvances.filter(advance => advance.worker?._id === record._id);
+                                const pendingAdvance = workerAdvances.reduce((total, advance) => total + advance.remainingAmount, 0);
+                                return `₹${pendingAdvance.toFixed(2)}`;
+                            }
+                        },
+                        {
+                            header: 'Actions',
+                            accessor: 'actions',
+                            render: (worker) => (
+                                <div className="flex space-x-2">
+                                    <button
+                                        onClick={() => openAdvanceModal(worker)}
+                                        className="p-1 text-blue-600 hover:text-blue-800"
+                                        title="Create Advance Voucher"
+                                    >
+                                        <FaMoneyBillWave className='text-xl' />
+                                    </button>
+                                    <button
+                                        onClick={() => openHistoryModal(worker)}
+                                        className="p-1 text-green-600 hover:text-green-800"
+                                        title="View Advance History"
+                                    >
+                                        <FaHistory className='text-xl' />
+                                    </button>
+                                </div>
+                            )
+                        }
+                    ]}
+                    data={filteredWorkers}
+                    noDataMessage="No employees found."
+                />
+            )}
 
             {/* Advance Voucher Modal */}
             <Modal
@@ -574,6 +608,7 @@ const AdvanceManagement = () => {
                                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
@@ -587,6 +622,15 @@ const AdvanceManagement = () => {
                                                     </td>
                                                     <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
                                                         {advance.description}
+                                                    </td>
+                                                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                                                        <button
+                                                            onClick={() => showDeleteConfirm(advance)}
+                                                            className="p-1 text-red-600 hover:text-red-800"
+                                                            title="Delete Advance Voucher"
+                                                        >
+                                                            <FaTrash className='text-lg' />
+                                                        </button>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -688,11 +732,11 @@ const AdvanceManagement = () => {
                 </div>
             </Modal>
 
-            {/* Worker Advances Modal - Shows all advances for a specific worker */}
+            {/* Worker Advances Modal - Shows detailed advances for a specific worker */}
             <Modal
                 isOpen={isWorkerAdvancesModalOpen}
                 onClose={() => setIsWorkerAdvancesModalOpen(false)}
-                title={`Advances Taken by - ${selectedWorker?.name}`}
+                title={`Advance History - ${selectedWorker?.name}`}
                 size="lg"
             >
                 <div className="mt-4">
@@ -710,6 +754,46 @@ const AdvanceManagement = () => {
                             onClick={() => setIsWorkerAdvancesModalOpen(false)}
                         >
                             Close
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Delete Confirmation Modal */}
+            <Modal
+                isOpen={isDeleteConfirmModalOpen}
+                onClose={() => {
+                    setIsDeleteConfirmModalOpen(false);
+                    setAdvanceToDelete(null);
+                }}
+                title="Confirm Delete"
+            >
+                <div className="mt-4">
+                    <p className="text-gray-700 mb-4">
+                        Are you sure you want to delete this advance voucher? This action cannot be undone.
+                    </p>
+                    {advanceToDelete && (
+                        <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                            <p><strong>Date:</strong> {new Date(advanceToDelete.createdAt).toLocaleDateString()}</p>
+                            <p><strong>Amount:</strong> ₹{advanceToDelete.amount.toFixed(2)}</p>
+                            <p><strong>Description:</strong> {advanceToDelete.description}</p>
+                        </div>
+                    )}
+                    <div className="flex justify-end space-x-2">
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setIsDeleteConfirmModalOpen(false);
+                                setAdvanceToDelete(null);
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="danger"
+                            onClick={handleDeleteAdvance}
+                        >
+                            Delete
                         </Button>
                     </div>
                 </div>

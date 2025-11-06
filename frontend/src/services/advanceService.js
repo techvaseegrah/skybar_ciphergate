@@ -57,3 +57,18 @@ export const deductAdvance = async (advanceId, deductionData) => {
     throw error.response ? error.response.data : new Error('Failed to deduct advance amount');
   }
 };
+
+// Function to delete an advance voucher
+export const deleteAdvanceVoucher = async (advanceId) => {
+  try {
+    const token = getAuthToken();
+    // Add timestamp to prevent caching
+    const timestamp = new Date().getTime();
+    const response = await api.delete(`/advances/${advanceId}?_t=${timestamp}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data;
+  } catch (error) {
+    throw error.response ? error.response.data : new Error('Failed to delete advance voucher');
+  }
+};

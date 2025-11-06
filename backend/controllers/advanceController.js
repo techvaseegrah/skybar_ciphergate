@@ -144,9 +144,43 @@ const deductAdvance = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Delete an advance voucher
+// @route   DELETE /api/advances/:id
+// @access  Private/Admin
+const deleteAdvance = asyncHandler(async (req, res) => {
+  const { id: advanceId } = req.params;
+  const { subdomain } = req.user;
+
+  // Find the advance
+  const advance = await Advance.findById(advanceId);
+  if (!advance) {
+    return res.status(404).json({ message: 'Advance not found' });
+  }
+
+  // Check if advance belongs to the same subdomain
+  if (advance.subdomain !== subdomain) {
+    return res.status(403).json({ message: 'Access denied' });
+  }
+
+  // Update worker's final salary (add back the advance amount since we're deleting the advance)
+  const worker = await Worker.findById(advance.worker);
+  if (worker) {
+    worker.finalSalary = worker.finalSalary + advance.amount;
+    await worker.save();
+  }
+
+  // Delete the advance
+  await Advance.deleteOne({ _id: advanceId });
+
+  res.status(200).json({
+    message: 'Advance voucher deleted successfully'
+  });
+});
+
 module.exports = {
   createAdvance,
   getAdvances,
   getWorkerAdvances,
-  deductAdvance
+  deductAdvance,
+  deleteAdvance
 };
