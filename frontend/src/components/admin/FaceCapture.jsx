@@ -3,6 +3,7 @@ import Webcam from 'react-webcam';
 import * as faceapi from 'face-api.js';
 import Button from '../common/Button';
 import Spinner from '../common/Spinner';
+import { FaSyncAlt } from 'react-icons/fa'; // Added camera icon for switch button
 
 const FaceCapture = ({ onFacesCaptured }) => {
   const webcamRef = useRef(null);
@@ -11,6 +12,8 @@ const FaceCapture = ({ onFacesCaptured }) => {
   const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [error, setError] = useState('');
   const [isCapturing, setIsCapturing] = useState(false);
+  // Camera facing mode state
+  const [facingMode, setFacingMode] = useState('user'); // 'user' for front camera, 'environment' for back camera
 
   useEffect(() => {
     const loadModels = async () => {
@@ -50,6 +53,11 @@ const FaceCapture = ({ onFacesCaptured }) => {
 
     loadModels();
   }, []);
+
+  // Function to switch camera
+  const switchCamera = () => {
+    setFacingMode(prevMode => prevMode === 'user' ? 'environment' : 'user');
+  };
 
   const captureFace = async () => {
     if (!webcamRef.current || !isModelLoaded || capturedFaces.length >= 5 || isCapturing) return;
@@ -130,7 +138,7 @@ const FaceCapture = ({ onFacesCaptured }) => {
           ref={webcamRef}
           screenshotFormat="image/jpeg"
           videoConstraints={{ 
-            facingMode: 'user',
+            facingMode: facingMode, // Use dynamic facing mode
             width: { ideal: 640 },
             height: { ideal: 480 },
             frameRate: { ideal: 30, min: 15 }
@@ -138,6 +146,24 @@ const FaceCapture = ({ onFacesCaptured }) => {
           className="w-full rounded-lg"
         />
         <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
+        
+        {/* Camera Switch Button */}
+        <div className="absolute top-4 right-4">
+          <button
+            onClick={switchCamera}
+            className="bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-75 transition-all duration-200 flex items-center justify-center"
+            aria-label="Switch camera"
+          >
+            <FaSyncAlt className="text-lg" />
+          </button>
+        </div>
+      </div>
+
+      {/* Camera Mode Indicator */}
+      <div className="text-center mb-4">
+        <p className="text-xs text-gray-500">
+          Using {facingMode === 'user' ? 'Front' : 'Back'} Camera
+        </p>
       </div>
 
       {!isModelLoaded && (

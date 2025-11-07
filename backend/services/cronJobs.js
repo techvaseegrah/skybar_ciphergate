@@ -70,31 +70,29 @@ const autoPunchOutWorkers = async (subdomain) => {
           continue;
         }
         
-        // Check if worker already has a punch-out for today
-        const existingPunchOut = await Attendance.findOne({
+        // Get all attendance records for this worker for today, sorted by time
+        const todayAttendanceRecords = await Attendance.find({
           worker: workerId,
           subdomain: subdomain,
-          date: currentDate,
-          presence: false // punch-out records have presence: false
-        });
+          date: currentDate
+        }).sort({ createdAt: 1 }); // Sort by creation time ascending
         
-        if (existingPunchOut) {
-          console.log(`Worker ${worker.name} already punched out today, skipping auto punch-out`);
+        // If no attendance records today, skip
+        if (todayAttendanceRecords.length === 0) {
+          console.log(`Worker ${worker.name} has no attendance records for today, skipping auto punch-out`);
           continue;
         }
         
-        // Check if worker has a punch-in for today
-        const punchInRecord = await Attendance.findOne({
-          worker: workerId,
-          subdomain: subdomain,
-          date: currentDate,
-          presence: true // punch-in records have presence: true
-        });
+        // Find the latest attendance record (last in the sorted array)
+        const latestRecord = todayAttendanceRecords[todayAttendanceRecords.length - 1];
         
-        if (!punchInRecord) {
-          console.log(`Worker ${worker.name} has no punch-in record for today, skipping auto punch-out`);
+        // If the latest record is an OUT punch, they're already punched out
+        if (latestRecord.presence === false) {
+          console.log(`Worker ${worker.name} is already punched out (latest record is OUT), skipping auto punch-out`);
           continue;
         }
+        
+        // If we reach here, the latest record is an IN punch, so we need to auto punch out
         
         // Get current time in India timezone
         const indiaTime = Intl.DateTimeFormat('en-US', {
@@ -124,7 +122,7 @@ const autoPunchOutWorkers = async (subdomain) => {
           status: 'Auto-Out'
         });
         
-        console.log(`Auto punched out worker: ${worker.name}`);
+        console.log(`Auto punched out worker: ${worker.name} at ${currentTime}`);
         autoPunchedOutCount++;
       } catch (workerError) {
         console.error(`Error processing worker ${workerId} for auto punch-out:`, workerError);
