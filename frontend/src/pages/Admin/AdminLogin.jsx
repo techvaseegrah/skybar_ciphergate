@@ -55,7 +55,11 @@ const AdminLogin = () => {
             const result = await login(credentials, 'admin');
             localStorage.setItem('tasktracker-subdomain', result.subdomain);
             toast.success('Login successful!');
-            navigate('/admin');
+            
+            // Add a small delay to ensure context is updated before navigation
+            setTimeout(() => {
+                navigate('/admin');
+            }, 100);
         } catch (error) {
             toast.error(error.response?.data?.message || 'Login failed. Please check your credentials.');
         } finally {
