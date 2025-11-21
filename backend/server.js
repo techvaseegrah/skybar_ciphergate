@@ -35,6 +35,7 @@ const corsOptions = {
     const allowedOrigins = [
       'http://localhost:3000',
       'https://tvtasks.netlify.app',
+      'https://ciphergate.sharurecreationclub.com' // Add your domain here
     ];
     const regex = /^http:\/\/.*\.localhost:3000$/; // Allow subdomains of localhost:3000
 
