@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Download Face-API Models</title>
+</head>
+<body>
+    <h1>Download Face-API Models</h1>
+    <p>Click the buttons below to download the required model files:</p>
+    
+    <button onclick="downloadFile('tiny_face_detector_model-weights_manifest.json')">Download Tiny Face Detector Manifest</button><br><br>
+    <button onclick="downloadFile('tiny_face_detector_model-shard1')">Download Tiny Face Detector Shard</button><br><br>
+    <button onclick="downloadFile('face_landmark_68_model-weights_manifest.json')">Download Face Landmark Manifest</button><br><br>
+    <button onclick="downloadFile('face_landmark_68_model-shard1')">Download Face Landmark Shard</button><br><br>
+    <button onclick="downloadFile('face_recognition_model-weights_manifest.json')">Download Face Recognition Manifest</button><br><br>
+    <button onclick="downloadFile('face_recognition_model-shard1')">Download Face Recognition Shard</button><br><br>
+    
+    <div id="status"></div>
+
+    <script>
+        const baseUrl = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/';
+        const statusDiv = document.getElementById('status');
+        
+        async function downloadFile(filename) {
+            try {
+                statusDiv.innerHTML = `Downloading ${filename}...`;
+                
+                const response = await fetch(baseUrl + filename);
+                if (!response.ok) {
+                    throw new Error(`Failed to download ${filename}: ${response.status}`);
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                statusDiv.innerHTML = `Downloaded ${filename} successfully!`;
+            } catch (error) {
+                statusDiv.innerHTML = `Error downloading ${filename}: ${error.message}`;
+                console.error(error);
+            }
+        }
+    </script>
+</body>
+</html>

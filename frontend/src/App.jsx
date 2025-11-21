@@ -1,0 +1,172 @@
+import React from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import AdminLayout from './components/layout/AdminLayout';
+
+// Public pages
+import Home from './pages/Home';
+import AdminLogin from './pages/Admin/AdminLogin';
+import AdminRegister from './pages/Admin/AdminRegister';
+import WorkerLogin from './pages/Worker/WorkerLogin';
+
+// Protected pages
+import AdminDashboard from './pages/Admin/AdminDashboard';
+import WorkerDashboard from './pages/Worker/WorkerDashboard';
+
+// Management Pages
+import WorkerManagement from './components/admin/WorkerManagement';
+import DepartmentManagement from './components/admin/DepartmentManagement';
+import LeaveManagement from './components/admin/LeaveManagement';
+import AttendanceManagement from './components/admin/AttendanceManagement';
+import NotificationManagement from './components/admin/NotificationManagement';
+import SalaryManagement from './components/admin/SalaryManagement';
+import AdvanceManagement from './components/admin/AdvanceManagement';
+
+// Protected route component
+import PrivateRoute from './components/common/PrivateRoute';
+
+// Context
+import appContext from './context/AppContext';
+import { useEffect, useState } from 'react';
+import WorkerAttendance from './components/admin/WorkerAttendance';
+import Settings from './components/admin/Settings';
+
+// NEW COMPONENTS
+
+import ForgotPassword from './components/admin/ForgotPassword';
+import ResetPassword from './components/admin/ResetPassword';
+import HolidayManagement from './components/admin/HolidayManagement';
+import SalaryReport from './components/admin/SalaryReport'; // New component
+
+
+function App() {
+  // Initialize subdomain with the actual value from localStorage immediately
+  const [subdomain, setSubdomain] = useState(() => {
+    const stored = localStorage.getItem('tasktracker-subdomain');
+    console.log('剥 DEBUG: Initial subdomain from localStorage:', stored);
+    return stored || 'main'; // Default to 'main' instead of null
+  });
+
+  const getSubdomain = () => {
+    return localStorage.getItem('tasktracker-subdomain') || 'main';
+  };
+
+  // Custom function to update subdomain and localStorage
+  const updateSubdomain = (newSubdomain) => {
+    console.log('剥 DEBUG: Updating subdomain to:', newSubdomain);
+    if (newSubdomain && newSubdomain !== 'main') {
+      localStorage.setItem('tasktracker-subdomain', newSubdomain);
+    } else {
+      localStorage.removeItem('tasktracker-subdomain');
+    }
+    setSubdomain(newSubdomain || 'main');
+  };
+
+  // Monitor localStorage changes and subdomain updates
+  useEffect(() => {
+    // Listen for storage changes from other tabs/windows
+    const handleStorageChange = (e) => {
+      if (e.key === 'tasktracker-subdomain') {
+        const newValue = e.newValue || 'main';
+        console.log('剥 DEBUG: Storage change detected:', newValue);
+        setSubdomain(newValue);
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    // Also check periodically for subdomain changes
+    const interval = setInterval(() => {
+      const current = getSubdomain();
+      setSubdomain(prev => {
+        if (prev !== current) {
+          console.log('剥 DEBUG: Subdomain changed from', prev, 'to', current);
+          return current;
+        }
+        return prev;
+      });
+    }, 2000); // Check every 2 seconds (reduced frequency)
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Log subdomain changes for debugging
+  useEffect(() => {
+    console.log('剥 DEBUG: App.jsx subdomain state changed to:', subdomain);
+  }, [subdomain]);
+
+  const contextValue = {
+    subdomain,
+    setSubdomain: updateSubdomain // Use our custom function
+  };
+
+  return (
+    <appContext.Provider value={contextValue}>
+      <div className="App">
+        {/* Debug info - remove in production */}
+        {import.meta.env.DEV && (
+          <div style={{ 
+            position: 'fixed', 
+            top: 0, 
+            right: 0, 
+            background: '#000', 
+            color: '#fff', 
+            padding: '5px', 
+            fontSize: '12px',
+            zIndex: 9999 
+          }}>
+            Company Name: {subdomain || 'null'}
+          </div>
+        )}
+
+        <Routes>
+          {/* Public routes */}
+          <Route path="/" element={<Home />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin/register" element={<AdminRegister />} />
+          <Route path="/worker/login" element={<WorkerLogin />} />
+
+          {/* NEW PASSWORD ROUTES */}
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password/:token" element={<ResetPassword />} />
+
+          {/* Protected Admin routes with Layout */}
+          <Route element={<PrivateRoute allowedRoles={['admin']} />}>
+            <Route path="/admin/*" element={<AdminLayout />}>
+              <Route index element={<AdminDashboard />} />
+              <Route path="workers" element={<WorkerManagement />} />
+              <Route path="salary" element={<SalaryManagement />} />
+              <Route path="advances" element={<AdvanceManagement />} />
+              <Route path="attendance" element={<AttendanceManagement />} />
+              <Route path="attendance/:id" element={<WorkerAttendance />} />
+              <Route path="departments" element={<DepartmentManagement />} />
+              <Route path="leaves" element={<LeaveManagement />} />
+              <Route path="holidays" element={<HolidayManagement />} />
+              <Route path="notifications" element={<NotificationManagement />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="salary-report" element={<SalaryReport />} /> {/* New route */}
+              
+              {/* Catch-all route for unknown admin paths */}
+              <Route path="*" element={<Navigate to="/admin" replace />} />
+            </Route>
+          </Route>
+
+          {/* Protected Worker routes */}
+          <Route element={<PrivateRoute allowedRoles={['worker']} />}>
+            <Route path="/worker/*" element={<WorkerDashboard />}>
+              {/* Worker routes are handled inside WorkerDashboard component */}
+              <Route path="*" element={<Navigate to="/worker" replace />} />
+            </Route>
+          </Route>
+
+          {/* 404 Not Found Route */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
+    </appContext.Provider>
+  );
+}
+
+export default App;
