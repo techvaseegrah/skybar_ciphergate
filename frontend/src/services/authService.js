@@ -42,8 +42,10 @@ export const login = async (credentials, userType) => {
       finalSalary: userData.finalSalary
     }));
 
+    console.log('AuthService - Login successful, user data saved:', userData);
     return userData;
   } catch (error) {
+    console.error('AuthService - Login failed:', error);
     throw error;
   }
 };
