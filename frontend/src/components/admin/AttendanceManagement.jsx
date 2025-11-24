@@ -445,26 +445,26 @@ function processAttendanceByDay(attendanceData) {
 
     return (
         <Fragment>
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <h1 className="text-2xl font-bold">Attendance Management</h1>
-                <div className='flex space-x-6 justify-center items-center'>
+                <div className='flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-6 justify-center items-center w-full sm:w-auto'>
                     <Button
                         variant="primary"
-                        className="flex items-center"
+                        className="flex items-center w-full sm:w-auto justify-center"
                         onClick={() => setIsModalOpen(true)}
                     >
                         <FaPlus className="mr-2" />Attendance
                     </Button>
                     <Button
                         variant="primary"
-                        className="flex items-center"
+                        className="flex items-center w-full sm:w-auto justify-center"
                         onClick={() => setIsFaceAttendanceOpen(true)}
                     >
                         <FaCamera className="mr-2" />Face Attendance
                     </Button>
                     <Button
                         variant="primary"
-                        className="flex items-center"
+                        className="flex items-center w-full sm:w-auto justify-center"
                         onClick={downloadAttendanceCSV}
                     >
                         <FaDownload className="mr-2" />Download
