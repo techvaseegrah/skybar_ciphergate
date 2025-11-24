@@ -85,7 +85,7 @@ const Sidebar = ({
       {/* Mobile menu button */}
       <button
         type="button"
-        className="md:hidden fixed top-4 left-4 z-50 p-2 rounded-xl text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-gray-300 transition-all duration-200 backdrop-blur-sm bg-white/80 shadow-sm"
+        className="md:hidden fixed top-4 right-4 z-50 p-2 rounded-xl text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-gray-300 transition-all duration-200 backdrop-blur-sm bg-white/80 shadow-sm"
         onClick={toggleSidebar}
       >
         <span className="sr-only">Open sidebar</span>
