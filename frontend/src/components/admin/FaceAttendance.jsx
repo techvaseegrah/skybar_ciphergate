@@ -26,6 +26,7 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
   const [currentLocation, setCurrentLocation] = useState(null); // State for current location
   const [cooldownWorkers, setCooldownWorkers] = useState({}); // Track cooldown for workers
   const { user } = useAuth(); // Get current user
+  const [facingMode, setFacingMode] = useState('user'); // 'user' for front camera, 'environment' for back camera
 
   // Load face detection models
   useEffect(() => {
@@ -198,55 +199,29 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
     ctx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2;
     ctx.stroke();
     
-    // Draw center marker
+    // Draw inner guidance circle
     ctx.beginPath();
-    ctx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
-    ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
-    ctx.fill();
+    ctx.arc(centerX, centerY, radius * 0.7, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
   };
 
-  // Check if worker is in cooldown period
-  const isWorkerInCooldown = (workerRfid) => {
-    const cooldownInfo = cooldownWorkers[workerRfid];
-    if (!cooldownInfo) return false;
-    
-    const now = Date.now();
-    const timeSinceLastPunch = now - cooldownInfo.timestamp;
-    
-    // 2 minutes cooldown period (120000 milliseconds)
-    return timeSinceLastPunch < 120000;
+  // Toggle between front and back camera
+  const toggleCamera = () => {
+    setFacingMode(prevMode => prevMode === 'user' ? 'environment' : 'user');
   };
 
-  // Set worker cooldown
-  const setWorkerCooldown = (workerRfid) => {
-    setCooldownWorkers(prev => ({
-      ...prev,
-      [workerRfid]: {
-        timestamp: Date.now()
-      }
-    }));
-  };
-
-  // Recognize face from webcam and mark attendance
-  const recognizeFaceAndMark = async () => {
-    // Check if location is allowed before proceeding
-    if (!locationAllowed) {
-      setError('Attendance not allowed from your current location. Please move to the designated attendance area.');
-      // In worker mode, close the modal after showing the error
-      if (workerMode) {
-        setTimeout(() => {
-          onClose();
-        }, 3000); // Close after 3 seconds to allow user to read the error message
-      }
-      return;
-    }
+  // Process face recognition
+  const processFaceRecognition = async () => {
+    if (isProcessing) return;
     
-    // In worker mode, ensure we have the current worker data
-    if (workerMode && !currentWorker) {
-      setError('Worker data not available. Please try again.');
+    // Validate required conditions
+    if (!isOpen) {
+      setError('Attendance modal is not open.');
       return;
     }
     
@@ -289,7 +264,7 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
         return;
       }
     }
-
+    
     // Validate video dimensions
     const videoWidth = video.videoWidth || video.width;
     const videoHeight = video.videoHeight || video.height;
@@ -452,48 +427,68 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
                 // If presence = false, next action is Punch Out
                 // Ensuring consistency with RFID attendance logic:
                 const nextAction = lastAttendanceResponse.presence ? 'Punch In' : 'Punch Out';
-                console.log('Setting attendance type to:', nextAction);
-                setAttendanceType(nextAction);
                 
-                // Directly mark attendance without confirmation popup
-                await handleDirectAttendance(worker, nextAction, subdomain);
-              } catch (attendanceError) {
-                console.error('Error getting last attendance:', attendanceError);
-                // According to project specifications, we should determine the next action based on 
-                // the worker's last attendance record and not default to Punch In when there's an error
-                // Let's show an error message and not proceed with the confirmation popup
-                setError('Unable to determine attendance action. Please try again.');
+                setAttendanceType(nextAction);
+                setShowConfirmation(true);
+              } catch (lastAttendanceError) {
+                console.error('Error getting last attendance:', lastAttendanceError);
+                setError('Failed to determine next attendance action. Please try again.');
                 setIsProcessing(false);
-                // Don't show confirmation popup when we can't determine the correct action
-                return;
               }
+            } else {
+              setError('Employee not found. Please ensure your face is registered.');
+              setIsProcessing(false);
             }
           } else {
-            setError('No matching employee found. Please try again or ensure your face is properly registered.');
+            setError('Face not recognized. Please ensure good lighting and clear visibility of your face.');
+            setIsProcessing(false);
           }
         } catch (resizeError) {
-          console.error('Error resizing detection:', resizeError);
-          setError('Failed to resize face detection. Please try again.');
+          console.error('Error resizing face detection:', resizeError);
+          setError('Face detection processing failed. Please try again.');
+          setIsProcessing(false);
         }
       } else {
-        setError('No face detected. Please make sure your face is clearly visible and positioned within the circular frame.');
+        setError('No face detected. Please position your face clearly within the circular frame.');
+        setIsProcessing(false);
       }
     } catch (err) {
-      console.error('Error recognizing face:', err);
-      // Provide more specific error messages based on the error type
-      if (err.message && err.message.includes('resizeResults')) {
-        setError('Face detection processing failed. Please ensure your camera is working and refresh the page.');
-      } else if (err.message && err.message.includes('tensor')) {
-        setError('Model loading error. Please clear browser cache and refresh the page.');
-      } else {
-        setError('Failed to recognize face. Please try again. (' + (err.message || 'Unknown error') + ')');
-      }
-    } finally {
+      console.error('Error in face recognition:', err);
+      setError(`Face recognition failed: ${err.message}. Please try again.`);
       setIsProcessing(false);
     }
   };
 
-  // Handle direct attendance without confirmation
+  // Set worker cooldown (2 minutes)
+  const setWorkerCooldown = (rfid) => {
+    const cooldownExpiry = Date.now() + 2 * 60 * 1000; // 2 minutes from now
+    setCooldownWorkers(prev => ({
+      ...prev,
+      [rfid]: cooldownExpiry
+    }));
+    
+    // Clean up expired cooldowns periodically
+    setTimeout(() => {
+      setCooldownWorkers(prev => {
+        const updated = { ...prev };
+        const now = Date.now();
+        Object.keys(updated).forEach(key => {
+          if (updated[key] < now) {
+            delete updated[key];
+          }
+        });
+        return updated;
+      });
+    }, 2 * 60 * 1000); // Check again in 2 minutes
+  };
+
+  // Check if worker is in cooldown period
+  const isWorkerInCooldown = (rfid) => {
+    const cooldownExpiry = cooldownWorkers[rfid];
+    return cooldownExpiry && cooldownExpiry > Date.now();
+  };
+
+  // Handle direct attendance submission
   const handleDirectAttendance = async (worker, nextAction, subdomain) => {
     if (!worker || !subdomain) return;
 
@@ -531,139 +526,212 @@ const FaceAttendance = ({ subdomain, isOpen, onClose, workerMode = false, curren
     }
   };
 
-  // Auto-detection loop - Increased frequency for faster scanning
-  useEffect(() => {
-    let interval;
-    if (isOpen && isModelLoaded && !showConfirmation && !isProcessing) {
-      interval = setInterval(() => {
-        if (!isProcessing) {
-          recognizeFaceAndMark();
-        }
-      }, 500); // Check every 0.5 seconds for much faster scanning (reduced from 1.5 seconds)
+  // Handle manual attendance submission
+  const handleManualAttendance = async () => {
+    if (!matchedWorker || !attendanceType || !subdomain) return;
+    
+    try {
+      setIsProcessing(true);
+      
+      // Pass the attendanceType (Punch In/Punch Out) to determine the presence state
+      // Ensuring consistency with RFID attendance logic:
+      // When attendanceType is 'Punch In', presence should be true
+      // When attendanceType is 'Punch Out', presence should be false
+      const presence = attendanceType === 'Punch In';
+      
+      // Set worker cooldown before making the API call
+      setWorkerCooldown(matchedWorker.rfid);
+      
+      // Send the presence value to backend, which will use it directly
+      await putAttendance({ rfid: matchedWorker.rfid, subdomain, presence });
+      
+      // Show success message
+      toast.success(`Attendance marked successfully as ${attendanceType}!`);
+      
+      // Reset state and close modal
+      setMatchedWorker(null);
+      setShowConfirmation(false);
+      setIsProcessing(false);
+      
+      // Close the modal after a short delay
+      setTimeout(() => {
+        onClose();
+      }, 1500);
+    } catch (error) {
+      console.error('Attendance error:', error);
+      setError('Failed to mark attendance. Please try again.');
+      setIsProcessing(false);
+      
+      // Remove cooldown on error so user can try again
+      setCooldownWorkers(prev => {
+        const newCooldown = { ...prev };
+        delete newCooldown[matchedWorker.rfid];
+        return newCooldown;
+      });
     }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isOpen, isModelLoaded, showConfirmation, isProcessing]);
+  };
+
+  // Handle cancel confirmation
+  const handleCancelConfirmation = () => {
+    setShowConfirmation(false);
+    setMatchedWorker(null);
+    setAttendanceType('');
+  };
+
+  if (!isOpen) return null;
 
   return (
-    <>
-      <Modal
-        isOpen={isOpen}
-        onClose={onClose}
-        title="Face Attendance"
-        size="md"
-      >
-        <div className="py-4">
-          {!isModelLoaded ? (
-            <div className="flex flex-col items-center justify-center py-8">
-              <Spinner size="lg" />
-              <p className="mt-4 text-gray-600">Loading face recognition models...</p>
-              <p className="mt-2 text-sm text-gray-500">This may take a few moments</p>
-            </div>
-          ) : isLoading ? (
-            <div className="flex flex-col items-center justify-center py-8">
-              <Spinner size="lg" />
-              <p className="mt-4 text-gray-600">Loading employee data...</p>
-            </div>
-          ) : showConfirmation && matchedWorker ? (
-            <div className="text-center py-4">
-              <div className="flex justify-center mb-4">
-                {matchedWorker.photo ? (
-                  <img
-                    src={matchedWorker.photo}
-                    alt={matchedWorker.name}
-                    className="w-24 h-24 rounded-full object-cover border-2 border-green-500"
-                  />
-                ) : (
-                  <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center border-2 border-green-500">
-                    <span className="text-2xl font-bold text-gray-600">
-                      {matchedWorker.name.charAt(0)}
-                    </span>
-                  </div>
+    <Modal isOpen={isOpen} onClose={onClose} title="Face Attendance" size="lg">
+      <div className="face-attendance-container">
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-8">
+            <Spinner size="lg" />
+            <p className="mt-4 text-blue-600">Loading employee data...</p>
+          </div>
+        ) : (
+          <>
+            {/* Location status indicator */}
+            {locationChecked && (
+              <div className={`mb-4 p-3 rounded-md text-center ${
+                locationAllowed 
+                  ? 'bg-green-50 text-green-700 border border-green-200' 
+                  : 'bg-red-50 text-red-700 border border-red-200'
+              }`}>
+                <p className="font-medium">
+                  {locationAllowed 
+                    ? '✓ You are within the allowed attendance area' 
+                    : '✗ You are outside the allowed attendance area'}
+                </p>
+                {currentLocation && (
+                  <p className="text-sm mt-1">
+                    Current location: {currentLocation.latitude.toFixed(6)}, {currentLocation.longitude.toFixed(6)} 
+                    (±{Math.round(currentLocation.accuracy)}m)
+                  </p>
                 )}
               </div>
-              <h3 className="text-xl font-semibold mb-2 text-gray-800">Attendance Marked</h3>
-              <p className="text-gray-700 mb-1">Name: {matchedWorker.name}</p>
-              <p className="text-gray-700 mb-6">ID: {matchedWorker.rfid}</p>
-              <p className="text-lg font-semibold mb-6">
-                <span className={attendanceType === 'Punch In' ? 'text-green-600' : 'text-red-600'}>
-                  {attendanceType}
-                </span>
-              </p>
-              <div className="mt-4">
-                <p className="text-gray-600">Please wait 2 minutes before punching again</p>
-              </div>
+            )}
+
+            <div className="webcam-container relative mb-4">
+              <Webcam
+                audio={false}
+                ref={webcamRef}
+                screenshotFormat="image/jpeg"
+                videoConstraints={{ 
+                  facingMode: facingMode,
+                  width: { ideal: 640 },
+                  height: { ideal: 480 },
+                  frameRate: { ideal: 30, min: 15 }
+                }}
+                className="w-full rounded-lg"
+              />
+              <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
             </div>
-          ) : (
-            <div className="face-attendance-container">
-              {/* Location Information */}
-              {locationChecked && (
-                <div className={`mb-4 p-3 rounded-md text-center ${
-                  locationAllowed 
-                    ? 'bg-green-50 text-green-700 border border-green-200' 
-                    : 'bg-red-50 text-red-700 border border-red-200'
-                }`}>
-                  <p className="font-medium">
-                    {locationAllowed 
-                      ? '✓ You are within the allowed attendance area' 
-                      : '✗ You are outside the allowed attendance area'}
-                  </p>
-                  {currentLocation && (
-                    <p className="text-sm mt-1">
-                      Current location: {currentLocation.latitude.toFixed(6)}, {currentLocation.longitude.toFixed(6)} 
-                      (±{Math.round(currentLocation.accuracy)}m)
-                    </p>
+
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-md border border-red-200">
+                <p>{error}</p>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2 mb-4">
+              <Button
+                onClick={processFaceRecognition}
+                disabled={isProcessing || !isModelLoaded || isLoading || !workers.length}
+                variant="primary"
+                className="flex items-center justify-center flex-1"
+              >
+                {isProcessing ? (
+                  <>
+                    <Spinner size="sm" className="mr-2" />
+                    Processing...
+                  </>
+                ) : (
+                  'Scan Face'
+                )}
+              </Button>
+              
+              {/* Camera toggle button */}
+              <Button onClick={toggleCamera} variant="outline" className="flex-1">
+                Switch to {facingMode === 'user' ? 'Back' : 'Front'} Camera
+              </Button>
+              
+              <Button
+                onClick={onClose}
+                variant="outline"
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+            </div>
+
+            {showConfirmation && matchedWorker && (
+              <div className="mt-4 p-4 bg-blue-50 rounded-md border border-blue-200">
+                <h3 className="text-lg font-semibold text-blue-800 mb-2">Confirm Attendance</h3>
+                <div className="flex items-center mb-3">
+                  {matchedWorker.photo ? (
+                    <img 
+                      src={matchedWorker.photo} 
+                      alt={matchedWorker.name} 
+                      className="w-12 h-12 rounded-full object-cover mr-3"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center mr-3">
+                      <span className="text-gray-500 font-bold">
+                        {matchedWorker.name.charAt(0)}
+                      </span>
+                    </div>
                   )}
+                  <div>
+                    <p className="font-medium">{matchedWorker.name}</p>
+                    <p className="text-sm text-gray-600">RFID: {matchedWorker.rfid}</p>
+                  </div>
                 </div>
-              )}
-
-              <div className="webcam-container relative mb-4">
-                <Webcam
-                  audio={false}
-                  ref={webcamRef}
-                  screenshotFormat="image/jpeg"
-                  videoConstraints={{ 
-                    facingMode: 'user',
-                    width: { ideal: 640 },
-                    height: { ideal: 480 },
-                    frameRate: { ideal: 30, min: 15 }
-                  }}
-                  className="w-full rounded-lg"
-                />
-                <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
+                <p className="mb-4">
+                  Next action: <span className="font-semibold">{attendanceType}</span>
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleManualAttendance}
+                    disabled={isProcessing}
+                    variant="primary"
+                    className="flex-1"
+                  >
+                    {isProcessing ? <Spinner size="sm" /> : 'Confirm'}
+                  </Button>
+                  <Button
+                    onClick={handleCancelConfirmation}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                </div>
               </div>
+            )}
 
-              <div className="text-center mb-4">
-                <div className="inline-block p-2 bg-blue-100 rounded-full">
-                  <div className="w-4 h-4 bg-blue-500 rounded-full animate-pulse"></div>
-                </div>
-                <p className="text-sm text-gray-600 mt-2">
-                  {isProcessing ? 'Recognizing face...' : 'Position your face within the circular frame'}
+            {isModelLoaded && workers.length === 0 && (
+              <div className="mt-4 p-4 bg-yellow-50 rounded-md border border-yellow-200">
+                <p className="text-yellow-800">
+                  No employees with face data found. Please ensure employees have registered their face data.
                 </p>
               </div>
+            )}
 
-              {error && (
-                <div className="mb-4 p-3 text-center text-red-600 bg-red-50 rounded-md border border-red-200">
-                  {error}
-                </div>
-              )}
-
-              <div className="text-center text-gray-600 mb-4">
-                <p className="font-medium">Face Recognition Status</p>
-                <p className="text-sm mt-1">
-                  {isProcessing ? 'Analyzing facial features...' : 'Waiting for face detection'}
-                </p>
+            {isModelLoaded && !isLoading && workers.length > 0 && (
+              <div className="mt-4 text-sm text-gray-600">
+                <p className="font-medium">Instructions:</p>
+                <ul className="list-disc list-inside mt-1">
+                  <li>Position your face within the green circular frame</li>
+                  <li>Ensure good lighting on your face</li>
+                  <li>Remove sunglasses or face coverings</li>
+                  <li>Look directly at the camera</li>
+                </ul>
               </div>
-
-              <div className="mt-4 text-center text-sm text-gray-500">
-                <p>Registered employees with face data: {workers.length}</p>
-              </div>
-            </div>
-          )}
-        </div>
-      </Modal>
-    </>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 };
 
