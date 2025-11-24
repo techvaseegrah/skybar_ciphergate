@@ -206,7 +206,8 @@ settingsSchema.methods.getWorkingDaysForMonth = function (year, month) {
   // month should be 1-12 (January-December)
   const monthString = `${year}-${month.toString().padStart(2, '0')}`;
   const monthSetting = this.monthlyWorkingDays.find(m => m.month === monthString);
-  return monthSetting ? monthSetting.workingDays : 0;
+  // Return a default value of 26 working days if not set (can be adjusted as needed)
+  return monthSetting ? monthSetting.workingDays : 26;
 };
 
 // Method to get attendance timer for a worker
