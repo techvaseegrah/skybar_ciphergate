@@ -11,6 +11,7 @@ const FaceCapture = ({ onFacesCaptured }) => {
   const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [error, setError] = useState('');
   const [isCapturing, setIsCapturing] = useState(false);
+  const [facingMode, setFacingMode] = useState('user'); // 'user' for front camera, 'environment' for back camera
 
   useEffect(() => {
     const loadModels = async () => {
@@ -122,6 +123,11 @@ const FaceCapture = ({ onFacesCaptured }) => {
     }
   };
 
+  // Toggle between front and back camera
+  const toggleCamera = () => {
+    setFacingMode(prevMode => prevMode === 'user' ? 'environment' : 'user');
+  };
+
   return (
     <div className="face-capture-container">
       <div className="relative mb-4">
@@ -130,7 +136,7 @@ const FaceCapture = ({ onFacesCaptured }) => {
           ref={webcamRef}
           screenshotFormat="image/jpeg"
           videoConstraints={{ 
-            facingMode: 'user',
+            facingMode: facingMode,
             width: { ideal: 640 },
             height: { ideal: 480 },
             frameRate: { ideal: 30, min: 15 }
@@ -166,6 +172,11 @@ const FaceCapture = ({ onFacesCaptured }) => {
         
         <Button onClick={clearCapturedFaces} variant="outline">
           Clear All
+        </Button>
+        
+        {/* Camera toggle button */}
+        <Button onClick={toggleCamera} variant="outline">
+          Switch to {facingMode === 'user' ? 'Back' : 'Front'} Camera
         </Button>
       </div>
 
