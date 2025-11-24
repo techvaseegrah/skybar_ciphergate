@@ -74,7 +74,7 @@ const autoPunchOutWorkers = async () => {
           continue;
         }
         
-        // Create auto out punch
+        // Create auto out punch (without isMissedOutPunch flag for normal auto out)
         await Attendance.create({
           name: worker.name,
           username: worker.username,
@@ -86,8 +86,8 @@ const autoPunchOutWorkers = async () => {
           date: currentDateFormatted,
           time: currentTimeFormatted,
           presence: false, // Out punch
-          worker: worker._id,
-          isMissedOutPunch: true
+          worker: worker._id
+          // Removed isMissedOutPunch: true to make it a normal auto out punch
         });
         
         console.log(`Auto-punched out worker: ${worker.name} (RFID: ${worker.rfid})`);
