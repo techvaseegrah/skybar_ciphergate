@@ -1,8 +1,9 @@
 import { useState, useEffect, useContext } from 'react';
 import { Link } from 'react-router-dom';
-import { FaUsers, FaCalendarAlt, FaFileInvoice } from 'react-icons/fa';
+import { FaUsers, FaCalendarAlt, FaFileInvoice, FaCheckCircle, FaTimesCircle } from 'react-icons/fa';
 import { getWorkers } from '../../services/workerService';
 import { getAllLeaves } from '../../services/leaveService';
+import { getAttendance } from '../../services/attendanceService';
 import Card from '../common/Card';
 import Spinner from '../common/Spinner';
 import appContext from '../../context/AppContext';
@@ -16,6 +17,10 @@ const Dashboard = () => {
       approved: 0,
       rejected: 0,
     },
+    attendance: {
+      present: 0,
+      absent: 0,
+    },
   });
   const [isLoading, setIsLoading] = useState(true);
   const [topWorkers, setTopWorkers] = useState([]);
@@ -27,19 +32,44 @@ const Dashboard = () => {
       const [
         workersDataRaw,
         leavesDataRaw,
+        attendanceDataRaw,
       ] = await Promise.all([
         getWorkers({ subdomain }),
         getAllLeaves({ subdomain }),
+        getAttendance({ subdomain }),
       ]);
 
       // Defensive check: ensure leavesData is an array
       const workersData = Array.isArray(workersDataRaw) ? workersDataRaw : [];
       const leavesData = Array.isArray(leavesDataRaw) ? leavesDataRaw : [];
+      const attendanceData = Array.isArray(attendanceDataRaw?.attendance) ? attendanceDataRaw.attendance : [];
 
       // Calculate stats for leaves and comments
       const pendingLeaves = leavesData.filter(leave => leave.status === 'Pending');
       const approvedLeaves = leavesData.filter(leave => leave.status === 'Approved');
       const rejectedLeaves = leavesData.filter(leave => leave.status === 'Rejected');
+
+      // Calculate present/absent stats
+      // Get unique workers who have attendance records today with at least one IN punch
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Create a set to store workers who have punched IN today (should remain present all day)
+      const workersPresentToday = new Set();
+      
+      // Go through all attendance records for today
+      attendanceData
+        .filter(record => record.date === today)
+        .forEach(record => {
+          const workerId = record.worker?._id || record.worker;
+          // If the worker has an IN punch today, they should be counted as present for the whole day
+          if (workerId && record.presence === true) {
+            workersPresentToday.add(workerId);
+          }
+        });
+      
+      // Count present workers (those who have punched IN today, regardless of later OUT punches)
+      const presentCount = workersPresentToday.size;
+      const absentCount = workersData.length - presentCount;
 
       // Get top 5 workers by points
       const sortedWorkers = [...workersData]
@@ -53,6 +83,10 @@ const Dashboard = () => {
           pending: pendingLeaves.length,
           approved: approvedLeaves.length,
           rejected: rejectedLeaves.length,
+        },
+        attendance: {
+          present: presentCount,
+          absent: absentCount,
         },
       });
 
@@ -84,86 +118,107 @@ const Dashboard = () => {
     <div className="p-4 md:p-6">
       <h1 className="text-3xl font-bold text-gray-900 mb-8">Admin Dashboard</h1>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-semibold text-blue-800 mb-1">Employees</h3>
-              <p className="text-3xl font-bold text-blue-900">{stats.workers}</p>
+      {/* Stats cards with triangle-inspired design */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {/* Employees Card - Triangle Style */}
+        <div className="relative bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-blue-400 rounded-bl-full opacity-20"></div>
+          <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-700 rounded-tr-full opacity-20"></div>
+          <div className="p-6 relative z-10">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-lg font-semibold text-blue-100 mb-1">Employees</h3>
+                <p className="text-3xl font-bold text-white">{stats.workers}</p>
+              </div>
+              <div className="bg-white/20 p-3 rounded-xl backdrop-blur-sm">
+                <FaUsers className="text-white text-2xl" />
+              </div>
             </div>
-            <div className="bg-blue-500/10 p-3 rounded-xl">
-              <FaUsers className="text-blue-600 text-2xl" />
-            </div>
-          </div>
-          <Link to="/admin/workers" className="text-blue-600 text-sm hover:underline block mt-4 font-medium">
-            Manage Employees →
-          </Link>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-yellow-50 to-yellow-100 border border-yellow-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-semibold text-yellow-800 mb-1">Pending Leaves</h3>
-              <p className="text-3xl font-bold text-yellow-900">{stats.leaves.pending}</p>
-            </div>
-            <div className="bg-yellow-500/10 p-3 rounded-xl">
-              <FaCalendarAlt className="text-yellow-600 text-2xl" />
-            </div>
-          </div>
-          <Link to="/admin/leaves" className="text-yellow-600 text-sm hover:underline block mt-4 font-medium">
-            View Requests →
-          </Link>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-semibold text-green-800 mb-1">Approved Leaves</h3>
-              <p className="text-3xl font-bold text-green-900">{stats.leaves.approved}</p>
-            </div>
-            <div className="bg-green-500/10 p-3 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            <Link to="/admin/workers" className="text-blue-100 text-sm hover:underline block mt-4 font-medium inline-flex items-center">
+              Manage Employees 
+              <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
               </svg>
-            </div>
+            </Link>
           </div>
-          <Link to="/admin/leaves" className="text-green-600 text-sm hover:underline block mt-4 font-medium">
-            View Requests →
-          </Link>
-        </Card>
+          {/* Triangle accent */}
+          <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[60px] border-l-transparent border-b-[60px] border-b-blue-700 opacity-30"></div>
+        </div>
 
-        <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-semibold text-purple-800 mb-1">Total Leaves</h3>
-              <p className="text-3xl font-bold text-purple-900">{stats.leaves.total}</p>
+        {/* Present Card - Triangle Style */}
+        <div className="relative bg-gradient-to-br from-green-500 to-green-600 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-green-400 rounded-bl-full opacity-20"></div>
+          <div className="absolute bottom-0 left-0 w-32 h-32 bg-green-700 rounded-tr-full opacity-20"></div>
+          <div className="p-6 relative z-10">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-lg font-semibold text-green-100 mb-1">Present</h3>
+                <p className="text-3xl font-bold text-white">{stats.attendance.present}</p>
+              </div>
+              <div className="bg-white/20 p-3 rounded-xl backdrop-blur-sm">
+                <FaCheckCircle className="text-white text-2xl" />
+              </div>
             </div>
-            <div className="bg-purple-500/10 p-3 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            <Link to="/admin/attendance" className="text-green-100 text-sm hover:underline block mt-4 font-medium inline-flex items-center">
+              View Attendance 
+              <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
               </svg>
-            </div>
+            </Link>
           </div>
-          <Link to="/admin/leaves" className="text-purple-600 text-sm hover:underline block mt-4 font-medium">
-            View All →
-          </Link>
-        </Card>
+          {/* Triangle accent */}
+          <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[60px] border-l-transparent border-b-[60px] border-b-green-700 opacity-30"></div>
+        </div>
 
-        <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-semibold text-indigo-800 mb-1">Salary Reports</h3>
-              <p className="text-3xl font-bold text-indigo-900">View</p>
+        {/* Absent Card - Triangle Style */}
+        <div className="relative bg-gradient-to-br from-red-500 to-red-600 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-red-400 rounded-bl-full opacity-20"></div>
+          <div className="absolute bottom-0 left-0 w-32 h-32 bg-red-700 rounded-tr-full opacity-20"></div>
+          <div className="p-6 relative z-10">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-lg font-semibold text-red-100 mb-1">Absent</h3>
+                <p className="text-3xl font-bold text-white">{stats.attendance.absent}</p>
+              </div>
+              <div className="bg-white/20 p-3 rounded-xl backdrop-blur-sm">
+                <FaTimesCircle className="text-white text-2xl" />
+              </div>
             </div>
-            <div className="bg-indigo-500/10 p-3 rounded-xl">
-              <FaFileInvoice className="text-indigo-600 text-2xl" />
-            </div>
+            <Link to="/admin/attendance" className="text-red-100 text-sm hover:underline block mt-4 font-medium inline-flex items-center">
+              View Attendance 
+              <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </Link>
           </div>
-          <Link to="/admin/salary-report" className="text-indigo-600 text-sm hover:underline block mt-4 font-medium">
-            Generate Reports →
-          </Link>
-        </Card>
+          {/* Triangle accent */}
+          <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[60px] border-l-transparent border-b-[60px] border-b-red-700 opacity-30"></div>
+        </div>
+
+        {/* Salary Reports Card - Triangle Style */}
+        <div className="relative bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-400 rounded-bl-full opacity-20"></div>
+          <div className="absolute bottom-0 left-0 w-32 h-32 bg-indigo-700 rounded-tr-full opacity-20"></div>
+          <div className="p-6 relative z-10">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-lg font-semibold text-indigo-100 mb-1">Salary Reports</h3>
+                <p className="text-3xl font-bold text-white">View</p>
+              </div>
+              <div className="bg-white/20 p-3 rounded-xl backdrop-blur-sm">
+                <FaFileInvoice className="text-white text-2xl" />
+              </div>
+            </div>
+            <Link to="/admin/salary-report" className="text-indigo-100 text-sm hover:underline block mt-4 font-medium inline-flex items-center">
+              Generate Reports 
+              <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </Link>
+          </div>
+          {/* Triangle accent */}
+          <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[60px] border-l-transparent border-b-[60px] border-b-indigo-700 opacity-30"></div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

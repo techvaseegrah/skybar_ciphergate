@@ -136,14 +136,7 @@ const Sidebar = ({
               <span className="ml-3 text-lg font-semibold text-gray-800 truncate">Sharu Recreation Club</span>
             )}
           </div>
-          <button
-            type="button"
-            className="md:hidden p-1 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-gray-300 transition-colors duration-200"
-            onClick={toggleSidebar}
-          >
-            <span className="sr-only">Close sidebar</span>
-            <FaTimes className="h-5 w-5" />
-          </button>
+          {/* Removed the 'X' button for mobile view as per requirements */}
         </div>
 
         {/* User profile */}

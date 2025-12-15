@@ -26,6 +26,8 @@ const AttendanceManagement = () => {
     const webcamRef = useRef(null);
     const inputRef = useRef(null);
     const [isPunching, setIsPunching] = useState(false);
+    // State for pagination
+    const [visibleDays, setVisibleDays] = useState(2); // Initially show 2 days
     
     const { subdomain } = useContext(appContext);
     const [confirmAction, setConfirmAction] = useState(null);
@@ -443,31 +445,37 @@ function processAttendanceByDay(attendanceData) {
         }
     ];
 
+    // Get only the visible days based on pagination
+    const visibleAttendance = processedAttendance.slice(0, visibleDays);
+    
+    // Check if there are more days to load
+    const hasMoreDays = visibleDays < processedAttendance.length;
+
     return (
         <Fragment>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <h1 className="text-2xl font-bold">Attendance Management</h1>
-                <div className='flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-6 justify-center items-center w-full sm:w-auto'>
+                <div className='flex flex-row space-x-2 justify-center items-center w-full sm:w-auto'>
                     <Button
                         variant="primary"
-                        className="flex items-center w-full sm:w-auto justify-center"
+                        className="flex items-center w-auto justify-center text-sm py-1 px-2"
                         onClick={() => setIsModalOpen(true)}
                     >
-                        <FaPlus className="mr-2" />Attendance
+                        <FaPlus className="mr-1 text-xs" />Attendance
                     </Button>
                     <Button
                         variant="primary"
-                        className="flex items-center w-full sm:w-auto justify-center"
+                        className="flex items-center w-auto justify-center text-sm py-1 px-2"
                         onClick={() => setIsFaceAttendanceOpen(true)}
                     >
-                        <FaCamera className="mr-2" />Face Attendance
+                        <FaCamera className="mr-1 text-xs" />Face Attendance
                     </Button>
                     <Button
                         variant="primary"
-                        className="flex items-center w-full sm:w-auto justify-center"
+                        className="flex items-center w-auto justify-center text-sm py-1 px-2"
                         onClick={downloadAttendanceCSV}
                     >
-                        <FaDownload className="mr-2" />Download
+                        <FaDownload className="mr-1 text-xs" />Download
                     </Button>
                 </div>
             </div>
@@ -509,11 +517,23 @@ function processAttendanceByDay(attendanceData) {
                         <Spinner size="md" variant="default" />
                     </div>
                 ) : (
-                    <Table
-                        columns={columns}
-                        data={processedAttendance}
-                        noDataMessage="No attendance records found."
-                    />
+                    <>
+                        <Table
+                            columns={columns}
+                            data={visibleAttendance}
+                            noDataMessage="No attendance records found."
+                        />
+                        {hasMoreDays && (
+                            <div className="flex justify-center mt-4">
+                                <Button 
+                                    variant="primary" 
+                                    onClick={() => setVisibleDays(prev => prev + 2)}
+                                >
+                                    Load More
+                                </Button>
+                            </div>
+                        )}
+                    </>
                 )}
 
                 <Modal

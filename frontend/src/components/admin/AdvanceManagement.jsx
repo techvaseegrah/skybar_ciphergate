@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { FaMoneyBillWave, FaHistory, FaChevronDown, FaChevronRight } from 'react-icons/fa';
 import { getWorkers } from '../../services/workerService';
-import { createAdvanceVoucher, getWorkerAdvances, getAdvanceVouchers } from '../../services/advanceService';
+import { createAdvanceVoucher, getWorkerAdvances, getAdvanceVouchers, updateAdvance, deleteAdvance } from '../../services/advanceService';
 import Card from '../common/Card';
 import Button from '../common/Button';
 import Table from '../common/Table';
@@ -24,6 +24,15 @@ const AdvanceManagement = () => {
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [isGlobalHistoryModalOpen, setIsGlobalHistoryModalOpen] = useState(false);
     const [isWorkerAdvancesModalOpen, setIsWorkerAdvancesModalOpen] = useState(false);
+    
+    // Edit Modal State
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editingAdvance, setEditingAdvance] = useState(null);
+    const [editFormData, setEditFormData] = useState({
+        amount: '',
+        description: ''
+    });
+
     const [selectedWorker, setSelectedWorker] = useState(null);
     const [workerAdvances, setWorkerAdvances] = useState([]);
     const [allAdvances, setAllAdvances] = useState([]);
@@ -33,7 +42,7 @@ const AdvanceManagement = () => {
     // Subdomain
     const { subdomain } = useContext(appContext);
 
-    // Load workers
+    // Load initial data
     const loadData = async () => {
         setIsLoading(true);
 
@@ -52,14 +61,37 @@ const AdvanceManagement = () => {
             console.error(error);
             setWorkers([]);
             setAllAdvances([]);
+            throw error; // Re-throw to allow caller to handle if needed
         } finally {
             setIsLoading(false);
         }
     };
 
+    // Helper to refresh data intelligently based on what modal is open
+    const refreshContextData = async () => {
+        try {
+            // 1. Always refresh global list in background to keep calculations (final salary) correct
+            const allAdvancesData = await getAdvanceVouchers();
+            setAllAdvances(Array.isArray(allAdvancesData) ? allAdvancesData : []);
+
+            // 2. If a specific worker modal is open, refresh their specific list immediately
+            if ((isHistoryModalOpen || isWorkerAdvancesModalOpen) && selectedWorker) {
+                const advances = await getWorkerAdvances(selectedWorker._id);
+                setWorkerAdvances(Array.isArray(advances) ? advances : []);
+            } else {
+                // Otherwise refresh the main worker list to update UI amounts
+                const workersData = await getWorkers({ subdomain });
+                setWorkers(Array.isArray(workersData) ? workersData : []);
+            }
+        } catch (error) {
+            console.error("Error refreshing data:", error);
+            // Don't show toast here to avoid spamming user
+            throw error; // Re-throw to allow caller to handle if needed
+        }
+    };
+
     // Refresh data when component is focused
     const refreshOnFocus = useRef(() => {
-        // Only refresh if data is already loaded
         if (!isLoading && workers.length > 0) {
             loadData();
         }
@@ -67,7 +99,6 @@ const AdvanceManagement = () => {
 
     // Function to handle advance deduction completion event
     const handleAdvanceDeductionCompleted = useRef((event) => {
-        // Refresh data when an advance deduction is completed
         if (!isLoading) {
             loadData();
             toast.info('Data automatically refreshed due to advance deduction');
@@ -75,30 +106,19 @@ const AdvanceManagement = () => {
     });
 
     useEffect(() => {
-        // Set up focus event listener
-        const handleFocus = () => {
-            refreshOnFocus.current();
-        };
-
-        // Set up advance deduction completion event listener
-        const handleDeductionEvent = (event) => {
-            handleAdvanceDeductionCompleted.current(event);
-        };
+        const handleFocus = () => refreshOnFocus.current();
+        const handleDeductionEvent = (event) => handleAdvanceDeductionCompleted.current(event);
 
         window.addEventListener('focus', handleFocus);
         window.addEventListener('advanceDeductionCompleted', handleDeductionEvent);
         
-        // Set up periodic refresh (every 5 minutes)
+        // Periodic refresh (every 5 minutes)
         const intervalId = setInterval(() => {
-            if (!isLoading) {
-                loadData();
-            }
-        }, 5 * 60 * 1000); // 5 minutes
+            if (!isLoading) loadData();
+        }, 5 * 60 * 1000);
         
-        // Initial load
         loadData();
 
-        // Cleanup
         return () => {
             window.removeEventListener('focus', handleFocus);
             window.removeEventListener('advanceDeductionCompleted', handleDeductionEvent);
@@ -118,14 +138,8 @@ const AdvanceManagement = () => {
 
     // Get workers who have taken advances
     const getWorkersWithAdvances = () => {
-        if (!Array.isArray(workers) || !Array.isArray(allAdvances)) {
-            return [];
-        }
-
-        // Get unique worker IDs who have advances
+        if (!Array.isArray(workers) || !Array.isArray(allAdvances)) return [];
         const workerIdsWithAdvances = [...new Set(allAdvances.map(advance => advance.worker?._id || advance.worker))];
-        
-        // Filter workers who have advances
         return workers.filter(worker => workerIdsWithAdvances.includes(worker._id));
     };
 
@@ -146,10 +160,7 @@ const AdvanceManagement = () => {
     // Open advance voucher modal
     const openAdvanceModal = (worker) => {
         setSelectedWorker(worker);
-        setFormData({
-            amount: '',
-            description: 'Advance Voucher'
-        });
+        setFormData({ amount: '', description: 'Advance Voucher' });
         setIsAdvanceModalOpen(true);
     };
 
@@ -157,13 +168,10 @@ const AdvanceManagement = () => {
     const openHistoryModal = async (worker) => {
         setSelectedWorker(worker);
         setIsHistoryModalOpen(true);
-        
         try {
             const advances = await getWorkerAdvances(worker._id);
             setWorkerAdvances(Array.isArray(advances) ? advances : []);
-            // Also refresh all advances to ensure pending advance calculation is up to date
-            const allAdvancesData = await getAdvanceVouchers();
-            setAllAdvances(Array.isArray(allAdvancesData) ? allAdvancesData : []);
+            refreshContextData(); // Sync everything else
         } catch (error) {
             toast.error('Failed to load advance history');
             setWorkerAdvances([]);
@@ -173,7 +181,6 @@ const AdvanceManagement = () => {
     // Open global advance history modal
     const openGlobalHistoryModal = async () => {
         setIsGlobalHistoryModalOpen(true);
-        
         try {
             const advances = await getAdvanceVouchers();
             setAllAdvances(Array.isArray(advances) ? advances : []);
@@ -187,7 +194,6 @@ const AdvanceManagement = () => {
     const openWorkerAdvancesModal = async (worker) => {
         setSelectedWorker(worker);
         setIsWorkerAdvancesModalOpen(true);
-        
         try {
             const advances = await getWorkerAdvances(worker._id);
             setWorkerAdvances(Array.isArray(advances) ? advances : []);
@@ -197,59 +203,136 @@ const AdvanceManagement = () => {
         }
     };
 
-    // Toggle row expansion
-    const toggleRowExpansion = (workerId) => {
-        setExpandedRows(prev => {
-            const newSet = new Set(prev);
-            if (newSet.has(workerId)) {
-                newSet.delete(workerId);
-            } else {
-                newSet.add(workerId);
-            }
-            return newSet;
+    // --- EDIT FUNCTIONALITY ---
+
+    const openEditModal = (advance) => {
+        setEditingAdvance(advance);
+        setEditFormData({
+            amount: advance.amount ? advance.amount.toString() : '',
+            description: advance.description || ''
         });
+        setIsEditModalOpen(true);
     };
 
-    // Process advances data to group by employee
-    const processAdvancesData = () => {
-        if (!Array.isArray(allAdvances) || allAdvances.length === 0) {
-            return [];
+    const handleEditChange = (e) => {
+        const { name, value } = e.target;
+        if (name === 'amount') {
+            if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                setEditFormData(prev => ({ ...prev, [name]: value }));
+            }
+        } else {
+            setEditFormData(prev => ({ ...prev, [name]: value }));
+        }
+    };
+
+    const handleUpdateAdvance = async (e) => {
+        e.preventDefault();
+        
+        const amount = parseFloat(editFormData.amount);
+        if (isNaN(amount) || amount <= 0) {
+            toast.error('Please enter a valid advance amount greater than 0');
+            return;
         }
 
-        // Group advances by worker
-        const groupedAdvances = allAdvances.reduce((acc, advance) => {
-            const workerId = advance.worker?._id || advance.worker;
-            if (!acc[workerId]) {
-                acc[workerId] = {
-                    workerId,
-                    workerName: advance.worker?.name || 'Unknown',
-                    workerRfid: advance.worker?.rfid || 'N/A',
-                    advances: [],
-                    totalAmount: 0,
-                    lastDeductionDate: null
-                };
+        setIsSubmitting(true);
+        
+        try {
+            await updateAdvance(editingAdvance._id, {
+                amount: amount,
+                description: editFormData.description
+            });
+            
+            toast.success('Advance voucher updated successfully');
+            setIsEditModalOpen(false);
+            setEditFormData({ amount: '', description: '' });
+            setEditingAdvance(null);
+            
+            // Update the worker advances list locally to reflect changes immediately
+            setWorkerAdvances(prevAdvances => 
+                prevAdvances.map(advance => 
+                    advance._id === editingAdvance._id 
+                        ? { ...advance, amount: amount, description: editFormData.description }
+                        : advance
+                )
+            );
+            
+            // Also update the global advances list
+            setAllAdvances(prevAdvances => 
+                prevAdvances.map(advance => 
+                    advance._id === editingAdvance._id 
+                        ? { ...advance, amount: amount, description: editFormData.description }
+                        : advance
+                )
+            );
+            
+            // Refresh data correctly
+            await refreshContextData();
+        } catch (error) {
+            console.error(error);
+            toast.error(error.message || 'Failed to update advance voucher');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    // --- DELETE FUNCTIONALITY ---
+    
+    const handleDeleteAdvance = async (advanceId) => {
+        // Add confirmation dialog with explicit permanent deletion warning
+        if (!window.confirm('Are you sure you want to permanently delete this advance voucher? This action cannot be undone and the voucher will be permanently removed from the system.')) {
+            return; // User cancelled the deletion
+        }
+        
+        try {
+            await deleteAdvance(advanceId);
+            
+            // Show success message
+            toast.success('Advance voucher permanently deleted');
+            
+            // SUCCESS BLOCK: Trigger data reload to refresh the table
+            // Update local state immediately for instant UI feedback
+            setWorkerAdvances(prevAdvances => 
+                prevAdvances.filter(advance => advance._id !== advanceId)
+            );
+            
+            setAllAdvances(prevAdvances => 
+                prevAdvances.filter(advance => advance._id !== advanceId)
+            );
+            
+            // Trigger full data reload from server to ensure consistency
+            // Use a small delay to ensure the database operation completes
+            setTimeout(async () => {
+                await refreshContextData();
+                await loadData();
+            }, 500);
+        } catch (error) {
+            // Fix for 404 Error: If item is not found, it's already deleted.
+            if (error.response && error.response.status === 404) {
+                toast.warn('Advance voucher was already deleted. Refreshing list...');
+                // Still remove from local state even if it was already deleted on server
+                setWorkerAdvances(prevAdvances => 
+                    prevAdvances.filter(advance => advance._id !== advanceId)
+                );
+                setAllAdvances(prevAdvances => 
+                    prevAdvances.filter(advance => advance._id !== advanceId)
+                );
+                
+                // Trigger full data reload from server to ensure consistency
+                setTimeout(async () => {
+                    await refreshContextData();
+                    await loadData();
+                }, 500);
+            } else {
+                console.error(error);
+                toast.error(error.message || 'Failed to delete advance voucher');
             }
-            
-            acc[workerId].advances.push(advance);
-            acc[workerId].totalAmount += advance.amount;
-            
-            // Update last deduction date
-            const advanceDate = new Date(advance.createdAt);
-            if (!acc[workerId].lastDeductionDate || advanceDate > acc[workerId].lastDeductionDate) {
-                acc[workerId].lastDeductionDate = advanceDate;
-            }
-            
-            return acc;
-        }, {});
-
-        // Convert to array
-        return Object.values(groupedAdvances);
+        }
     };
 
-    // Handle form input change
+    // --- CREATE FUNCTIONALITY ---
+
     const handleChange = (e) => {
         const { name, value } = e.target;
-        // Allow empty string or numbers to be typed for amount
         if (name === 'amount') {
             if (value === '' || /^\d*\.?\d*$/.test(value)) {
                 setFormData(prev => ({ ...prev, [name]: value }));
@@ -259,11 +342,9 @@ const AdvanceManagement = () => {
         }
     };
 
-    // Handle advance voucher submission
     const handleCreateAdvance = async (e) => {
         e.preventDefault();
         
-        // Validate amount
         const amount = parseFloat(formData.amount);
         if (isNaN(amount) || amount <= 0) {
             toast.error('Please enter a valid advance amount');
@@ -281,11 +362,14 @@ const AdvanceManagement = () => {
             
             toast.success('Advance voucher created successfully');
             setIsAdvanceModalOpen(false);
-            setFormData({
-                amount: '',
-                description: 'Advance Voucher'
-            });
-            loadData(); // Refresh worker data and advances data to show updated salary and pending advances
+            setFormData({ amount: '', description: 'Advance Voucher' });
+            
+            // Update UI
+            if (isWorkerAdvancesModalOpen && selectedWorker) {
+                 await refreshContextData();
+            } else {
+                 loadData();
+            }
         } catch (error) {
             toast.error(error.message || 'Failed to create advance voucher');
         } finally {
@@ -293,7 +377,7 @@ const AdvanceManagement = () => {
         }
     };
 
-    // Table columns configuration
+    // Table Columns
     const columns = [
         {
             header: 'Name',
@@ -305,7 +389,7 @@ const AdvanceManagement = () => {
                             src={record.photo
                                 ? record.photo
                                 : `https://ui-avatars.com/api/?name=${encodeURIComponent(record.name)}`}
-                            alt="Employee"
+                            alt={record.name}
                             className="w-8 h-8 rounded-full mr-2"
                         />
                     )}
@@ -313,35 +397,12 @@ const AdvanceManagement = () => {
                 </div>
             )
         },
-        {
-            header: 'Employee ID',
-            accessor: 'rfid'
-        },
-        {
-            header: 'Department',
-            accessor: 'department'
-        },
-        {
-            header: 'Base Salary',
-            accessor: 'salary',
-            render: (record) => record?.salary?.toFixed(2)
-        },
-        {
-            header: 'Final Salary',
-            accessor: 'finalSalary',
-            render: (record) => {
-                // Calculate final salary dynamically: base salary - pending advance
-                const workerAdvances = allAdvances.filter(advance => advance.worker?._id === record._id);
-                const pendingAdvance = workerAdvances.reduce((total, advance) => total + advance.remainingAmount, 0);
-                const finalSalary = record?.salary - pendingAdvance;
-                return `₹${finalSalary.toFixed(2)}`;
-            }
-        },
+        { header: 'RF ID', accessor: 'rfid' },
+        { header: 'Department', accessor: 'department' },
         {
             header: 'Pending Advance',
             accessor: 'pendingAdvance',
             render: (record) => {
-                // Calculate total pending advance for this worker
                 const workerAdvances = allAdvances.filter(advance => advance.worker?._id === record._id);
                 const pendingAdvance = workerAdvances.reduce((total, advance) => total + advance.remainingAmount, 0);
                 return `₹${pendingAdvance.toFixed(2)}`;
@@ -371,30 +432,6 @@ const AdvanceManagement = () => {
         }
     ];
 
-    // History table columns
-    const historyColumns = [
-        {
-            header: 'Date',
-            accessor: 'createdAt',
-            render: (record) => new Date(record.createdAt).toLocaleDateString()
-        },
-        {
-            header: 'Amount',
-            accessor: 'amount',
-            render: (record) => `₹${record.amount.toFixed(2)}`
-        },
-        {
-            header: 'Description',
-            accessor: 'description'
-        },
-        {
-            header: 'Approved By',
-            accessor: 'approvedBy',
-            render: (record) => record.approvedBy?.name || 'Unknown'
-        }
-    ];
-
-    // History table columns for workers with advances
     const historyWorkerColumns = [
         {
             header: 'Name',
@@ -408,49 +445,47 @@ const AdvanceManagement = () => {
                 </button>
             )
         },
-        {
-            header: 'RF ID',
-            accessor: 'rfid'
-        },
-        {
-            header: 'Department',
-            accessor: 'department'
-        },
+        { header: 'RF ID', accessor: 'rfid' },
+        { header: 'Department', accessor: 'department' },
         {
             header: 'Pending Advance',
             accessor: 'pendingAdvance',
-            render: (record) => {
-                const pendingAdvance = getPendingAdvanceForWorker(record._id);
-                return `₹${pendingAdvance.toFixed(2)}`;
-            }
+            render: (record) => `₹${getPendingAdvanceForWorker(record._id).toFixed(2)}`
         }
     ];
 
-    // Worker advances table columns
     const workerAdvancesColumns = [
+        { header: 'Date', accessor: 'createdAt', render: (record) => new Date(record.createdAt).toLocaleDateString() },
+        { header: 'Amount', accessor: 'amount', render: (record) => `₹${record.amount.toFixed(2)}` },
+        { header: 'Remaining Amount', accessor: 'remainingAmount', render: (record) => `₹${record.remainingAmount.toFixed(2)}` },
+        { header: 'Description', accessor: 'description' },
         {
-            header: 'Date',
-            accessor: 'createdAt',
-            render: (record) => new Date(record.createdAt).toLocaleDateString()
-        },
-        {
-            header: 'Amount',
-            accessor: 'amount',
-            render: (record) => `₹${record.amount.toFixed(2)}`
-        },
-        {
-            header: 'Remaining Amount',
-            accessor: 'remainingAmount',
-            render: (record) => `₹${record.remainingAmount.toFixed(2)}`
-        },
-        {
-            header: 'Description',
-            accessor: 'description'
+            header: 'Actions',
+            accessor: 'actions',
+            render: (record) => (
+                <div className="flex space-x-2">
+                    <button
+                        className="p-1 text-blue-600 hover:text-blue-800"
+                        title="Edit advance"
+                        onClick={() => openEditModal(record)}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                        </svg>
+                    </button>
+                    <button
+                        className="p-1 text-red-600 hover:text-red-800"
+                        title="Delete advance"
+                        onClick={() => handleDeleteAdvance(record._id)}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            )
         }
     ];
-
-    // Processed data for summary view
-    const processedAdvancesData = processAdvancesData();
 
     return (
         <div>
@@ -500,7 +535,7 @@ const AdvanceManagement = () => {
                 )}
             </Card>
 
-            {/* Advance Voucher Modal */}
+            {/* Advance Voucher Modal (CREATE) */}
             <Modal
                 isOpen={isAdvanceModalOpen}
                 onClose={() => setIsAdvanceModalOpen(false)}
@@ -521,7 +556,6 @@ const AdvanceManagement = () => {
                             title="Please enter a valid number (e.g., 100 or 50.50)"
                         />
                     </div>
-
                     <div className="form-group">
                         <label htmlFor="description" className="form-label">Description</label>
                         <input
@@ -534,27 +568,14 @@ const AdvanceManagement = () => {
                             required
                         />
                     </div>
-
                     <div className="flex justify-end mt-6 space-x-2">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setIsAdvanceModalOpen(false)}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            type="submit"
-                            variant="primary"
-                            disabled={isSubmitting}
-                        >
-                            {isSubmitting ? 'Processing...' : 'Create Voucher'}
-                        </Button>
+                        <Button type="button" variant="outline" onClick={() => setIsAdvanceModalOpen(false)}>Cancel</Button>
+                        <Button type="submit" variant="primary" disabled={isSubmitting}>{isSubmitting ? 'Processing...' : 'Create Voucher'}</Button>
                     </div>
                 </form>
             </Modal>
 
-            {/* Advance History Modal - Shows both Advance Voucher History and Advance Deduction History side by side */}
+            {/* Advance History Modal (Split View) */}
             <Modal
                 isOpen={isHistoryModalOpen}
                 onClose={() => setIsHistoryModalOpen(false)}
@@ -571,22 +592,33 @@ const AdvanceManagement = () => {
                                     <table className="min-w-full divide-y divide-gray-200">
                                         <thead className="bg-gray-50">
                                             <tr>
-                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Desc</th>
+                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
                                             {workerAdvances.map((advance) => (
                                                 <tr key={advance._id} className="hover:bg-gray-50">
-                                                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
-                                                        {new Date(advance.createdAt).toLocaleDateString()}
-                                                    </td>
-                                                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
-                                                        ₹{advance.amount.toFixed(2)}
-                                                    </td>
-                                                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
-                                                        {advance.description}
+                                                    <td className="px-4 py-2 text-sm text-gray-900">{new Date(advance.createdAt).toLocaleDateString()}</td>
+                                                    <td className="px-4 py-2 text-sm text-gray-900">₹{advance.amount.toFixed(2)}</td>
+                                                    <td className="px-4 py-2 text-sm text-gray-900">{advance.description}</td>
+                                                    <td className="px-4 py-2 text-sm text-gray-900">
+                                                        <div className="flex space-x-2">
+                                                            <button className="p-1 text-blue-600 hover:text-blue-800" title="Edit" onClick={() => openEditModal(advance)}>
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+                                                            </button>
+                                                            <button 
+                                                                className="p-1 text-red-600 hover:text-red-800" 
+                                                                title="Delete" 
+                                                                onClick={() => handleDeleteAdvance(advance._id)}
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                                                                </svg>
+                                                            </button>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -594,9 +626,7 @@ const AdvanceManagement = () => {
                                     </table>
                                 </div>
                             ) : (
-                                <div className="text-center py-8 text-gray-500">
-                                    No advance vouchers found for this employee.
-                                </div>
+                                <div className="text-center py-8 text-gray-500">No advance vouchers found.</div>
                             )}
                         </div>
 
@@ -608,23 +638,24 @@ const AdvanceManagement = () => {
                                     <table className="min-w-full divide-y divide-gray-200">
                                         <thead className="bg-gray-50">
                                             <tr>
-                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Desc</th>
+                                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
                                             {workerAdvances.flatMap(advance => 
                                                 (advance.deductions || []).map((deduction, index) => (
                                                     <tr key={`${advance._id}-${index}`} className="hover:bg-gray-50">
-                                                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
-                                                            {new Date(deduction.date).toLocaleDateString()}
-                                                        </td>
-                                                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
-                                                            ₹{deduction.amount.toFixed(2)}
-                                                        </td>
-                                                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
-                                                            {deduction.description}
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{new Date(deduction.date).toLocaleDateString()}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">₹{deduction.amount.toFixed(2)}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{deduction.description}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">
+                                                            <div className="flex space-x-2">
+                                                                <button className="p-1 text-gray-400 cursor-not-allowed" disabled><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg></button>
+                                                                <button className="p-1 text-gray-400 cursor-not-allowed" disabled><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg></button>
+                                                            </div>
                                                         </td>
                                                     </tr>
                                                 ))
@@ -633,25 +664,17 @@ const AdvanceManagement = () => {
                                     </table>
                                 </div>
                             ) : (
-                                <div className="text-center py-8 text-gray-500">
-                                    No advance deductions found for this employee.
-                                </div>
+                                <div className="text-center py-8 text-gray-500">No advance deductions found.</div>
                             )}
                         </div>
                     </div>
-                    
                     <div className="flex justify-end mt-6">
-                        <Button
-                            variant="outline"
-                            onClick={() => setIsHistoryModalOpen(false)}
-                        >
-                            Close
-                        </Button>
+                        <Button variant="outline" onClick={() => setIsHistoryModalOpen(false)}>Close</Button>
                     </div>
                 </div>
             </Modal>
 
-            {/* Global Advance History Modal - Shows workers with advances */}
+            {/* Global Advance History Modal */}
             <Modal
                 isOpen={isGlobalHistoryModalOpen}
                 onClose={() => setIsGlobalHistoryModalOpen(false)}
@@ -668,7 +691,6 @@ const AdvanceManagement = () => {
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    
                     <div className="overflow-x-auto">
                         <Table
                             columns={historyWorkerColumns}
@@ -676,19 +698,13 @@ const AdvanceManagement = () => {
                             noDataMessage="No employees with advances found."
                         />
                     </div>
-                    
                     <div className="flex justify-end mt-6">
-                        <Button
-                            variant="outline"
-                            onClick={() => setIsGlobalHistoryModalOpen(false)}
-                        >
-                            Close
-                        </Button>
+                        <Button variant="outline" onClick={() => setIsGlobalHistoryModalOpen(false)}>Close</Button>
                     </div>
                 </div>
             </Modal>
 
-            {/* Worker Advances Modal - Shows all advances for a specific worker */}
+            {/* Worker Advances Modal */}
             <Modal
                 isOpen={isWorkerAdvancesModalOpen}
                 onClose={() => setIsWorkerAdvancesModalOpen(false)}
@@ -703,16 +719,50 @@ const AdvanceManagement = () => {
                             noDataMessage="No advances found for this employee."
                         />
                     </div>
-                    
                     <div className="flex justify-end mt-6">
-                        <Button
-                            variant="outline"
-                            onClick={() => setIsWorkerAdvancesModalOpen(false)}
-                        >
-                            Close
-                        </Button>
+                        <Button variant="outline" onClick={() => setIsWorkerAdvancesModalOpen(false)}>Close</Button>
                     </div>
                 </div>
+            </Modal>
+
+            {/* Edit Advance Modal */}
+            <Modal
+                isOpen={isEditModalOpen}
+                onClose={() => setIsEditModalOpen(false)}
+                title="Edit Advance Voucher"
+            >
+                <form onSubmit={handleUpdateAdvance}>
+                    <div className="form-group">
+                        <label htmlFor="edit-amount" className="form-label">Advance Amount (₹)</label>
+                        <input
+                            type="text"
+                            id="edit-amount"
+                            name="amount"
+                            className="form-input"
+                            value={editFormData.amount}
+                            onChange={handleEditChange}
+                            required
+                            pattern="^\d*\.?\d*$"
+                            title="Please enter a valid number (e.g., 100 or 50.50)"
+                        />
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="edit-description" className="form-label">Description</label>
+                        <input
+                            type="text"
+                            id="edit-description"
+                            name="description"
+                            className="form-input"
+                            value={editFormData.description}
+                            onChange={handleEditChange}
+                            required
+                        />
+                    </div>
+                    <div className="flex justify-end mt-6 space-x-2">
+                        <Button type="button" variant="outline" onClick={() => setIsEditModalOpen(false)}>Cancel</Button>
+                        <Button type="submit" variant="primary" disabled={isSubmitting}>{isSubmitting ? 'Updating...' : 'Update Voucher'}</Button>
+                    </div>
+                </form>
             </Modal>
         </div>
     );

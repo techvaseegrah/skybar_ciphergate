@@ -144,9 +144,119 @@ const deductAdvance = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Update an advance voucher
+// @route   PUT /api/advances/:id
+// @access  Private/Admin
+const updateAdvance = asyncHandler(async (req, res) => {
+  console.log('Update advance called with ID:', req.params.id);
+  const { id: advanceId } = req.params;
+  const { amount, description } = req.body;
+  const adminId = req.user.id;
+  const subdomain = req.user.subdomain;
+
+  // Validate input
+  if (!amount) {
+    return res.status(400).json({ message: 'Amount is required' });
+  }
+
+  if (isNaN(amount) || amount <= 0) {
+    return res.status(400).json({ message: 'Amount must be a positive number' });
+  }
+
+  // Find the advance
+  const advance = await Advance.findById(advanceId);
+  console.log('Found advance:', advance);
+  if (!advance) {
+    return res.status(404).json({ message: 'Advance not found' });
+  }
+
+  // Check if advance belongs to the same subdomain
+  if (advance.subdomain !== subdomain) {
+    return res.status(403).json({ message: 'Access denied' });
+  }
+
+  // Store original values for calculations
+  const originalAmount = advance.amount;
+  const originalRemainingAmount = advance.remainingAmount;
+  
+  // Update advance details
+  advance.amount = parseFloat(amount);
+  advance.description = description || advance.description;
+  
+  // Update remaining amount based on the difference
+  const amountDifference = advance.amount - originalAmount;
+  advance.remainingAmount = originalRemainingAmount + amountDifference;
+
+  // Save the advance
+  await advance.save();
+
+  // Update worker's final salary
+  const worker = await Worker.findById(advance.worker);
+  if (worker) {
+    // Adjust worker's final salary based on the amount difference
+    worker.finalSalary = worker.finalSalary - amountDifference;
+    await worker.save();
+  }
+
+  res.status(200).json({
+    message: 'Advance updated successfully',
+    advance
+  });
+});
+
+// @desc    Delete an advance voucher
+// @route   DELETE /api/advances/:id
+// @access  Private/Admin
+const deleteAdvance = asyncHandler(async (req, res) => {
+  console.log('Delete advance called with ID:', req.params.id);
+  const { id: advanceId } = req.params;
+  const adminId = req.user.id;
+  const subdomain = req.user.subdomain;
+
+  // Find the advance
+  const advance = await Advance.findById(advanceId);
+  console.log('Found advance for deletion:', advance);
+  if (!advance) {
+    return res.status(404).json({ message: 'Advance not found' });
+  }
+
+  // Check if advance belongs to the same subdomain
+  if (advance.subdomain !== subdomain) {
+    return res.status(403).json({ message: 'Access denied' });
+  }
+
+  // Store amount for worker salary adjustment
+  const advanceAmount = advance.amount;
+  const totalDeductions = advance.deductions.reduce((sum, deduction) => sum + deduction.amount, 0);
+
+  // PERMANENT DELETE: Use deleteOne instead of remove for more explicit deletion
+  const deleteResult = await Advance.deleteOne({ _id: advanceId });
+  console.log('Delete result:', deleteResult);
+
+  // Verify deletion occurred
+  if (deleteResult.deletedCount === 0) {
+    return res.status(404).json({ message: 'Advance not found or already deleted' });
+  }
+
+  // Update worker's final salary
+  const worker = await Worker.findById(advance.worker);
+  if (worker) {
+    // Add back the advance amount minus any deductions that were already taken
+    // This ensures the worker's final salary is adjusted correctly
+    worker.finalSalary = worker.finalSalary + (advanceAmount - totalDeductions);
+    await worker.save();
+  }
+
+  res.status(200).json({
+    message: 'Advance deleted successfully'
+  });
+});
+
 module.exports = {
   createAdvance,
   getAdvances,
   getWorkerAdvances,
-  deductAdvance
+  deductAdvance,
+  updateAdvance,
+  deleteAdvance
 };

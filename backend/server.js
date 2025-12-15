@@ -34,10 +34,11 @@ const corsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = [
       'http://localhost:3000',
+      'http://localhost:5173', // Vite default port
       'https://tvtasks.netlify.app',
       'https://ciphergate.sharurecreationclub.com' // Add your domain here
     ];
-    const regex = /^http:\/\/.*\.localhost:3000$/; // Allow subdomains of localhost:3000
+    const regex = /^http:\/\/.*\.localhost:3000$|^http:\/\/.*\.localhost:5173$/; // Allow subdomains of localhost
 
     if (!origin || allowedOrigins.includes(origin) || regex.test(origin)) {
       callback(null, true);
@@ -99,7 +100,7 @@ if (process.env.NODE_ENV === 'production' || process.env.ENABLE_SCHEDULERS === '
 // Error handler (should be last)
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5002;  // Changed from 5001 to 5002
 app.listen(PORT, () => {
   console.log(`🌟 Server running on port ${PORT}`);
   console.log(`📧 Email service: ${process.env.EMAIL_USER ? 'Configured' : 'Not configured'}`);
