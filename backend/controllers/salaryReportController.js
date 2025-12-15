@@ -202,18 +202,6 @@ const calculateActualWorkingDays = (attendanceRecords, settings, year, month) =>
   
   console.log('Grouped attendance by date:', Object.keys(attendanceByDate));
   
-  // Get global attendance time from settings (use first batch if available)
-  let globalStartTime = '09:00'; // Default start time
-  let globalEndTime = '18:00'; // Default end time
-  
-  if (settings.batches && settings.batches.length > 0) {
-    const firstBatch = settings.batches[0];
-    if (firstBatch.from) globalStartTime = firstBatch.from;
-    if (firstBatch.to) globalEndTime = firstBatch.to;
-  }
-  
-  console.log('Global time range:', globalStartTime, '-', globalEndTime);
-  
   // For each date with attendance records, check if the worker was present
   for (const date in attendanceByDate) {
     const records = attendanceByDate[date];
@@ -225,31 +213,15 @@ const calculateActualWorkingDays = (attendanceRecords, settings, year, month) =>
     
     console.log('IN records:', inRecords.length, 'OUT records:', outRecords.length);
     
-    // If worker has both IN and OUT punches
+    // If worker has both IN and OUT punches, count as a working day
     if (inRecords.length > 0 && outRecords.length > 0) {
-      // Take the first IN punch
-      const inRecord = inRecords[0];
-      console.log('Checking IN record time:', inRecord.time);
-      
-      // Skip records with default time format
-      if (inRecord.time === '00:00:00 AM') {
-        console.log('Skipping record with default time format');
-        continue;
-      }
-      
-      // Check if IN time is within working hours
-      try {
-        if (isWithinGlobalTime(inRecord.time, globalStartTime, globalEndTime)) {
-          // Add to valid attendance dates if IN time is within working hours
-          console.log('Valid attendance date:', date);
-          validAttendanceDates.add(date);
-        } else {
-          console.log('Invalid attendance date (outside working hours):', date);
-        }
-      } catch (error) {
-        console.error('Error checking time for date', date, 'time:', inRecord.time, 'error:', error);
-        // If there's an error in time parsing, we'll be conservative and not count this day
-      }
+      // Add to valid attendance dates
+      console.log('Valid attendance date (has both IN and OUT):', date);
+      validAttendanceDates.add(date);
+    } else if (inRecords.length > 0) {
+      // If worker only has IN punches, still count as a working day (might have forgotten to punch out)
+      console.log('Valid attendance date (has IN only):', date);
+      validAttendanceDates.add(date);
     } else {
       console.log('Incomplete attendance records for date:', date);
     }
@@ -392,8 +364,8 @@ const generateSalaryReport = asyncHandler(async (req, res) => {
       
       console.log('Worker:', worker.name, 'Working days (from settings):', workingDays, 'Adjusted working days:', adjustedWorkingDays, 'Actual working days:', actualWorkingDays);
       
-      // Calculate per day salary
-      const perDaySalary = worker.salary > 0 && adjustedWorkingDays > 0 ? worker.salary / adjustedWorkingDays : 0;
+      // Calculate per day salary - FIXED: Use total working days, not adjusted days
+      const perDaySalary = worker.salary > 0 && workingDays > 0 ? worker.salary / workingDays : 0;
       
       // Calculate total salary based on actual working days
       const totalSalary = perDaySalary * numberOfWorkingDays;
@@ -408,10 +380,10 @@ const generateSalaryReport = asyncHandler(async (req, res) => {
       const pendingSalary = totalSalary - currentMonthAdvances - previousAdvances;
       
       // Count leaves (days when worker was absent)
-      // This should be the difference between adjusted working days and actual working days
-      const leaves = Math.max(0, adjustedWorkingDays - numberOfWorkingDays);
+      // This should be the difference between total working days and actual working days
+      const leaves = Math.max(0, workingDays - numberOfWorkingDays);
       
-      console.log('Worker:', worker.name, 'Leaves:', leaves, 'Adjusted total days:', adjustedWorkingDays, 'Working days:', numberOfWorkingDays);
+      console.log('Worker:', worker.name, 'Leaves:', leaves, 'Total working days:', workingDays, 'Working days:', numberOfWorkingDays);
       
       salaryReport.push({
         serialNumber: salaryReport.length + 1,
@@ -419,7 +391,7 @@ const generateSalaryReport = asyncHandler(async (req, res) => {
         employeeName: worker.name,
         designation: worker.department ? worker.department.name : 'N/A',
         monthlySalary: worker.salary,
-        totalDays: adjustedWorkingDays,
+        totalDays: workingDays, // Use total working days, not adjusted days
         leaves: leaves,
         workingDays: numberOfWorkingDays,
         perDaySalary: parseFloat(perDaySalary.toFixed(2)),
@@ -441,7 +413,7 @@ const generateSalaryReport = asyncHandler(async (req, res) => {
       data: {
         month: monthString,
         year: yearNum,
-        workingDays: adjustedWorkingDays,
+        workingDays: workingDays, // Use total working days, not adjusted days
         report: salaryReport
       }
     });
