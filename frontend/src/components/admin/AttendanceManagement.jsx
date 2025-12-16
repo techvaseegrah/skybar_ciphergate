@@ -6,11 +6,12 @@ import Webcam from "react-webcam";
 import jsQR from "jsqr";
 import appContext from '../../context/AppContext';
 import { toast } from 'react-toastify';
-import { putAttendance, getAttendance } from '../../services/attendanceService';
+import { putAttendance, getAttendance, getAttendanceDates, getAttendanceByDates } from '../../services/attendanceService';
 import Table from '../common/Table';
 import Spinner from '../common/Spinner';
 import { Link } from 'react-router-dom';
 import FaceAttendance from './FaceAttendance';
+import io from 'socket.io-client';
 
 const AttendanceManagement = () => {
     const [worker, setWorker] = useState({ rfid: "" });
@@ -27,10 +28,13 @@ const AttendanceManagement = () => {
     const inputRef = useRef(null);
     const [isPunching, setIsPunching] = useState(false);
     // State for pagination
-    const [visibleDays, setVisibleDays] = useState(2); // Initially show 2 days
+    const [loadedDates, setLoadedDates] = useState([]); // Track which dates have been loaded
+    const [availableDates, setAvailableDates] = useState([]); // All available dates
+    const [hasMoreDates, setHasMoreDates] = useState(false); // Whether there are more dates to load
     
     const { subdomain } = useContext(appContext);
     const [confirmAction, setConfirmAction] = useState(null);
+    const socketRef = useRef(null);
 
     const uniqueRfids = React.useMemo(() => {
         return [...new Set(attendanceData.map(record => record.rfid).filter(rfid => rfid && rfid.trim() !== ''))];
@@ -65,7 +69,7 @@ const AttendanceManagement = () => {
             toast.success(res.message || 'Attendance marked successfully!');
             setWorker({ rfid: '' });
             setConfirmAction(null);
-            fetchAttendanceData();
+            // Don't fetch all data again, rely on real-time updates
           })
           .catch(err => {
             console.error(err);
@@ -121,195 +125,293 @@ const AttendanceManagement = () => {
         }
     };
 
-    const fetchAttendanceData = async () => {
+    // Initialize WebSocket connection
+    useEffect(() => {
+        if (subdomain && subdomain !== 'main') {
+            // Initialize socket connection
+            socketRef.current = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:5002');
+            
+            // Join subdomain room
+            socketRef.current.emit('join-subdomain', subdomain);
+            
+            // Listen for attendance updates
+            socketRef.current.on('attendance-update', (data) => {
+                console.log('Received real-time attendance update:', data);
+                handleRealTimeAttendanceUpdate(data.attendance);
+            });
+            
+            // Clean up on unmount
+            return () => {
+                if (socketRef.current) {
+                    socketRef.current.disconnect();
+                }
+            };
+        }
+    }, [subdomain]);
+
+    // Handle real-time attendance updates
+    const handleRealTimeAttendanceUpdate = (newAttendance) => {
+        setAttendanceData(prevData => {
+            // Check if this attendance record already exists
+            const existingIndex = prevData.findIndex(item => item._id === newAttendance._id);
+            
+            if (existingIndex >= 0) {
+                // Update existing record
+                const updatedData = [...prevData];
+                updatedData[existingIndex] = newAttendance;
+                return updatedData;
+            } else {
+                // Add new record
+                // Check if today's date is already loaded
+                const today = new Date().toISOString().split('T')[0];
+                const isNewRecordForToday = newAttendance.date === today;
+                
+                if (isNewRecordForToday) {
+                    // Prepend today's date section if not already loaded
+                    return [newAttendance, ...prevData];
+                } else {
+                    // Append to existing data
+                    return [...prevData, newAttendance];
+                }
+            }
+        });
+    };
+
+    // Fetch available dates for pagination
+    const fetchAvailableDates = async () => {
+        try {
+            const response = await getAttendanceDates({ subdomain });
+            const dates = response.dates || [];
+            setAvailableDates(dates);
+            
+            // Load first 2 dates by default
+            if (dates.length > 0) {
+                const initialDates = dates.slice(0, 2);
+                setLoadedDates(initialDates);
+                await fetchAttendanceByDates(initialDates);
+                setHasMoreDates(dates.length > 2);
+            } else {
+                setIsLoading(false);
+            }
+        } catch (error) {
+            console.error('Failed to fetch available dates:', error);
+            toast.error('Failed to load attendance dates.');
+            setIsLoading(false);
+        }
+    };
+
+    // Fetch attendance data for specific dates
+    const fetchAttendanceByDates = async (dates) => {
+        // Set loading without affecting scroll position
         setIsLoading(true);
         try {
-            const data = await getAttendance({ subdomain });
-            console.log(data.attendance);
-            setAttendanceData(Array.isArray(data.attendance) ? data.attendance : []);
+            const response = await getAttendanceByDates({ subdomain, dates });
+            const newData = response.attendance || [];
+            setAttendanceData(prevData => {
+                // Filter out any existing records for these dates to avoid duplicates
+                const filteredPrevData = prevData.filter(item => !dates.includes(item.date));
+                return [...filteredPrevData, ...newData];
+            });
         } catch (error) {
-            console.error(error);
-            toast.error("Failed to fetch attendance data.");
+            console.error('Failed to fetch attendance by dates:', error);
+            toast.error('Failed to load attendance data.');
         } finally {
-            setIsLoading(false);
+            // Use setTimeout to ensure state updates don't affect scroll position
+            setTimeout(() => {
+                setIsLoading(false);
+            }, 0);
+        }
+    };
+
+    // Load more dates
+    const loadMoreDates = async () => {
+        // Prevent any default behavior that might cause scrolling
+        const currentIndex = availableDates.indexOf(loadedDates[loadedDates.length - 1]);
+        const nextDates = availableDates.slice(currentIndex + 1, currentIndex + 3);
+        
+        if (nextDates.length > 0) {
+            // Update loaded dates first
+            setLoadedDates(prev => [...prev, ...nextDates]);
+            // Then fetch attendance data
+            await fetchAttendanceByDates(nextDates);
+            // Finally update hasMoreDates
+            setHasMoreDates(currentIndex + 3 < availableDates.length);
         }
     };
 
     useEffect(() => {
         if (subdomain && subdomain !== 'main') {
-            fetchAttendanceData();
+            fetchAvailableDates();
         }
     }, [subdomain]);
 
       
-      
-   
-// Replace the existing filteredAttendance variable with:
-const filteredAttendance = attendanceData.filter(record => {
-    const matchesName = !searchName || record?.name?.toLowerCase().includes(searchName.toLowerCase());
-    const matchesDepartment = !filterDepartment || record?.departmentName?.toLowerCase().includes(filterDepartment.toLowerCase());
-    const matchesDate = !filterDate || (record.date && record.date.startsWith(filterDate));
-    const matchesRfid = !filterRfid || record?.rfid?.toLowerCase().includes(filterRfid.toLowerCase());
-    return matchesName && matchesDepartment && matchesDate && matchesRfid;
-});
+    // Replace the existing filteredAttendance variable with:
+    const filteredAttendance = attendanceData.filter(record => {
+        const matchesName = !searchName || record?.name?.toLowerCase().includes(searchName.toLowerCase());
+        const matchesDepartment = !filterDepartment || record?.departmentName?.toLowerCase().includes(filterDepartment.toLowerCase());
+        const matchesDate = !filterDate || (record.date && record.date.startsWith(filterDate));
+        const matchesRfid = !filterRfid || record?.rfid?.toLowerCase().includes(filterRfid.toLowerCase());
+        return matchesName && matchesDepartment && matchesDate && matchesRfid;
+    });
 
-const processedAttendance = processAttendanceByDay(filteredAttendance);
+    const processedAttendance = processAttendanceByDay(filteredAttendance);
 
-function processAttendanceByDay(attendanceData) {
-    // Helper to parse "10:51:40 AM" to seconds from midnight
-    function parseTime12hToSeconds(timeStr) {
-        if (typeof timeStr !== 'string') return 0;
-        const [time, modifier] = timeStr.trim().split(' ');
-        if (!time) return 0;
-        let [hours, minutes, seconds] = time.split(':').map(Number);
-        hours = hours || 0;
-        minutes = minutes || 0;
-        seconds = seconds || 0;
-        if (modifier && modifier.toUpperCase() === 'PM' && hours !== 12) hours += 12;
-        else if (modifier && modifier.toUpperCase() === 'AM' && hours === 12) hours = 0;
-        return hours * 3600 + minutes * 60 + seconds;
-    }
+    function processAttendanceByDay(attendanceData) {
+        // Helper to parse "10:51:40 AM" to seconds from midnight
+        function parseTime12hToSeconds(timeStr) {
+            if (typeof timeStr !== 'string') return 0;
+            const [time, modifier] = timeStr.trim().split(' ');
+            if (!time) return 0;
+            let [hours, minutes, seconds] = time.split(':').map(Number);
+            hours = hours || 0;
+            minutes = minutes || 0;
+            seconds = seconds || 0;
+            if (modifier && modifier.toUpperCase() === 'PM' && hours !== 12) hours += 12;
+            else if (modifier && modifier.toUpperCase() === 'AM' && hours === 12) hours = 0;
+            return hours * 3600 + minutes * 60 + seconds;
+        }
 
-    // Helper to parse "HH:mm:ss" duration to seconds
-    function parseDurationToSeconds(durationStr) {
-        if (typeof durationStr !== 'string') return 0;
-        const [hours, minutes, seconds] = durationStr.split(':').map(Number);
-        return (hours || 0) * 3600 + (minutes || 0) * 60 + (seconds || 0);
-    }
+        // Helper to parse "HH:mm:ss" duration to seconds
+        function parseDurationToSeconds(durationStr) {
+            if (typeof durationStr !== 'string') return 0;
+            const [hours, minutes, seconds] = durationStr.split(':').map(Number);
+            return (hours || 0) * 3600 + (minutes || 0) * 60 + (seconds || 0);
+        }
 
-    // Helper to format seconds to "HH:mm:ss"
-    function formatSecondsToDuration(totalSeconds) {
-        if (isNaN(totalSeconds) || totalSeconds < 0) return '00:00:00';
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = Math.floor(totalSeconds % 60);
-        return [hours, minutes, seconds].map(v => String(v).padStart(2, '0')).join(':');
-    }
+        // Helper to format seconds to "HH:mm:ss"
+        function formatSecondsToDuration(totalSeconds) {
+            if (isNaN(totalSeconds) || totalSeconds < 0) return '00:00:00';
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = Math.floor(totalSeconds % 60);
+            return [hours, minutes, seconds].map(v => String(v).padStart(2, '0')).join(':');
+        }
 
-    // Step 1: Group all raw punches by employee and date, maintaining order
-    const punchesGroupedByDay = {};
-    attendanceData.forEach(record => {
-        // Ensure date is properly formatted for grouping
-        let dateKey;
-        try {
-            // Handle different date formats
-            if (record.date instanceof Date) {
-                dateKey = record.date.toISOString().split('T')[0];
-            } else if (typeof record.date === 'string') {
-                // Check if it's already in YYYY-MM-DD format
-                if (/^\d{4}-\d{2}-\d{2}/.test(record.date)) {
-                    // Already in correct format, use as is
-                    dateKey = record.date.split('T')[0]; // Handle ISO strings with time
+        // Step 1: Group all raw punches by employee and date, maintaining order
+        const punchesGroupedByDay = {};
+        attendanceData.forEach(record => {
+            // Ensure date is properly formatted for grouping
+            let dateKey;
+            try {
+                // Handle different date formats
+                if (record.date instanceof Date) {
+                    dateKey = record.date.toISOString().split('T')[0];
+                } else if (typeof record.date === 'string') {
+                    // Check if it's already in YYYY-MM-DD format
+                    if (/^\d{4}-\d{2}-\d{2}/.test(record.date)) {
+                        // Already in correct format, use as is
+                        dateKey = record.date.split('T')[0]; // Handle ISO strings with time
+                    } else {
+                        // Try to parse as date string
+                        const parsedDate = new Date(record.date);
+                        if (!isNaN(parsedDate.getTime())) {
+                            dateKey = parsedDate.toISOString().split('T')[0];
+                        } else {
+                            // If parsing fails, use the original string
+                            dateKey = record.date;
+                        }
+                    }
                 } else {
-                    // Try to parse as date string
+                    // For any other type, try to convert to Date first
                     const parsedDate = new Date(record.date);
                     if (!isNaN(parsedDate.getTime())) {
                         dateKey = parsedDate.toISOString().split('T')[0];
                     } else {
-                        // If parsing fails, use the original string
-                        dateKey = record.date;
+                        // Fallback
+                        dateKey = String(record.date);
                     }
                 }
-            } else {
-                // For any other type, try to convert to Date first
-                const parsedDate = new Date(record.date);
-                if (!isNaN(parsedDate.getTime())) {
-                    dateKey = parsedDate.toISOString().split('T')[0];
-                } else {
-                    // Fallback
-                    dateKey = String(record.date);
-                }
+            } catch (error) {
+                // Final fallback
+                console.warn('Error parsing date for record:', record, error);
+                dateKey = String(record.date || 'Unknown');
             }
-        } catch (error) {
-            // Final fallback
-            console.warn('Error parsing date for record:', record, error);
-            dateKey = String(record.date || 'Unknown');
-        }
-        
-        const employeeDateKey = `${record.rfid || 'Unknown'}_${dateKey}`;
-        if (!punchesGroupedByDay[employeeDateKey]) {
-            punchesGroupedByDay[employeeDateKey] = {
-                ...record, // Copy some basic info
-                date: dateKey,
-                rawPunches: [], // Store all punches for this day/worker
-                inTimes: [], // For display: list of in times
-                outTimes: [], // For display: list of out times
-                duration: '00:00:00',
-                latestTimestamp: new Date(record.createdAt).getTime() // Keep track for sorting final list
-            };
-        }
-        punchesGroupedByDay[employeeDateKey].rawPunches.push(record);
-        punchesGroupedByDay[employeeDateKey].latestTimestamp = Math.max(
-            punchesGroupedByDay[employeeDateKey].latestTimestamp,
-            new Date(record.createdAt).getTime()
-        );
-    });
+            
+            const employeeDateKey = `${record.rfid || 'Unknown'}_${dateKey}`;
+            if (!punchesGroupedByDay[employeeDateKey]) {
+                punchesGroupedByDay[employeeDateKey] = {
+                    ...record, // Copy some basic info
+                    date: dateKey,
+                    rawPunches: [], // Store all punches for this day/worker
+                    inTimes: [], // For display: list of in times
+                    outTimes: [], // For display: list of out times
+                    duration: '00:00:00',
+                    latestTimestamp: new Date(record.createdAt).getTime() // Keep track for sorting final list
+                };
+            }
+            punchesGroupedByDay[employeeDateKey].rawPunches.push(record);
+            punchesGroupedByDay[employeeDateKey].latestTimestamp = Math.max(
+                punchesGroupedByDay[employeeDateKey].latestTimestamp,
+                new Date(record.createdAt).getTime()
+            );
+        });
 
-    const processedDays = [];
+        const processedDays = [];
 
-    for (const key in punchesGroupedByDay) {
-        const dayData = punchesGroupedByDay[key];
-        // Sort punches chronologically for the day
-        const sortedPunches = dayData.rawPunches.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        for (const key in punchesGroupedByDay) {
+            const dayData = punchesGroupedByDay[key];
+            // Sort punches chronologically for the day
+            const sortedPunches = dayData.rawPunches.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-        let totalDurationSeconds = 0;
-        let lastInTimeSeconds = null; // To track the last "in" punch for pairing
+            let totalDurationSeconds = 0;
+            let lastInTimeSeconds = null; // To track the last "in" punch for pairing
 
-        dayData.inTimes = []; // Reset for accurate population below
-        dayData.outTimes = []; // Reset for accurate population below
+            dayData.inTimes = []; // Reset for accurate population below
+            dayData.outTimes = []; // Reset for accurate population below
 
-        for (let i = 0; i < sortedPunches.length; i++) {
-            const punch = sortedPunches[i];
-            const punchTimeSeconds = parseTime12hToSeconds(punch.time);
+            for (let i = 0; i < sortedPunches.length; i++) {
+                const punch = sortedPunches[i];
+                const punchTimeSeconds = parseTime12hToSeconds(punch.time);
 
-            if (punch.presence) { // This is an IN punch
-                lastInTimeSeconds = punchTimeSeconds;
-                dayData.inTimes.push({ time: punch.time, isMissed: false }); // Always normal IN for display
-            } else { // This is an OUT punch
-                let isProblematicOut = false;
-                if (lastInTimeSeconds !== null) {
-                    // There was a preceding IN punch on this day
-                    if (punchTimeSeconds > lastInTimeSeconds) {
-                        totalDurationSeconds += (punchTimeSeconds - lastInTimeSeconds);
-                        lastInTimeSeconds = null; // Reset after a successful pair
+                if (punch.presence) { // This is an IN punch
+                    lastInTimeSeconds = punchTimeSeconds;
+                    dayData.inTimes.push({ time: punch.time, isMissed: false }); // Always normal IN for display
+                } else { // This is an OUT punch
+                    let isProblematicOut = false;
+                    if (lastInTimeSeconds !== null) {
+                        // There was a preceding IN punch on this day
+                        if (punchTimeSeconds > lastInTimeSeconds) {
+                            totalDurationSeconds += (punchTimeSeconds - lastInTimeSeconds);
+                            lastInTimeSeconds = null; // Reset after a successful pair
+                        } else {
+                            // Out time is before or same as last in time on the same day (problematic)
+                            isProblematicOut = true;
+                        }
                     } else {
-                        // Out time is before or same as last in time on the same day (problematic)
+                        // Out punch without a preceding IN punch on this day (problematic)
                         isProblematicOut = true;
                     }
-                } else {
-                    // Out punch without a preceding IN punch on this day (problematic)
-                    isProblematicOut = true;
+                    
+                    // Prioritize backend flag if available, otherwise use heuristic
+                    dayData.outTimes.push({
+                        time: punch.time,
+                        isMissed: punch.isMissedOutPunch || isProblematicOut // Use backend flag or heuristic
+                    });
                 }
-                
-                // Prioritize backend flag if available, otherwise use heuristic
-                dayData.outTimes.push({
-                    time: punch.time,
-                    isMissed: punch.isMissedOutPunch || isProblematicOut // Use backend flag or heuristic
-                });
             }
+
+            // If an IN punch was the last punch of the day, mark it as missed OUT (for display)
+            // This handles cases where an IN is followed by no OUT on the same day.
+            if (lastInTimeSeconds !== null) {
+                // Assume end of day for missed out punch visual.
+                // This is purely for display and doesn't create a new record in DB here.
+                dayData.outTimes.push({
+                    time: '-', // MODIFIED LINE: Changed 'FORGOTTEN OUT' to '-' or '' for empty default.
+                    isMissed: true // Mark as missed for display
+                });
+                // Also add the duration till a standard end of day for this specific visual placeholder
+                // You might need to refine totalDurationSeconds if you want to reflect this in the duration column
+                // For now, duration calculation below is only for matched pairs.
+            }
+
+            dayData.duration = formatSecondsToDuration(totalDurationSeconds);
+            processedDays.push(dayData);
         }
 
-        // If an IN punch was the last punch of the day, mark it as missed OUT (for display)
-        // This handles cases where an IN is followed by no OUT on the same day.
-        if (lastInTimeSeconds !== null) {
-            // Assume end of day for missed out punch visual.
-            // This is purely for display and doesn't create a new record in DB here.
-            dayData.outTimes.push({
-                time: '-', // MODIFIED LINE: Changed 'FORGOTTEN OUT' to '-' or '' for empty default.
-                isMissed: true // Mark as missed for display
-            });
-            // Also add the duration till a standard end of day for this specific visual placeholder
-            // You might need to refine totalDurationSeconds if you want to reflect this in the duration column
-            // For now, duration calculation below is only for matched pairs.
-        }
-
-        dayData.duration = formatSecondsToDuration(totalDurationSeconds);
-        processedDays.push(dayData);
+        // Sort the final list of processed days by latest activity
+        return processedDays.sort((a, b) => b.latestTimestamp - a.latestTimestamp);
     }
-
-    // Sort the final list of processed days by latest activity
-    return processedDays.sort((a, b) => b.latestTimestamp - a.latestTimestamp);
-}
 
     // Function to download attendance data as CSV
     const downloadAttendanceCSV = () => {
@@ -333,8 +435,8 @@ function processAttendanceByDay(attendanceData) {
             record?.rfid || 'Unknown',
             record?.departmentName || 'N/A',
             record.date || 'Unknown',
-            record.inTimes.join(' | '),
-            record.outTimes.join(' | '),
+            record.inTimes.map(inTime => inTime.time).join(' | '),
+            record.outTimes.map(outTime => outTime.time).join(' | '),
             record.duration || '00:00:00'
         ]);
     
@@ -445,12 +547,6 @@ function processAttendanceByDay(attendanceData) {
         }
     ];
 
-    // Get only the visible days based on pagination
-    const visibleAttendance = processedAttendance.slice(0, visibleDays);
-    
-    // Check if there are more days to load
-    const hasMoreDays = visibleDays < processedAttendance.length;
-
     return (
         <Fragment>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
@@ -520,14 +616,19 @@ function processAttendanceByDay(attendanceData) {
                     <>
                         <Table
                             columns={columns}
-                            data={visibleAttendance}
+                            data={processedAttendance}
                             noDataMessage="No attendance records found."
                         />
-                        {hasMoreDays && (
+                        {hasMoreDates && (
                             <div className="flex justify-center mt-4">
                                 <Button 
                                     variant="primary" 
-                                    onClick={() => setVisibleDays(prev => prev + 2)}
+                                    onClick={(e) => {
+                                        // Prevent default behavior that might cause scrolling
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        loadMoreDates();
+                                    }}
                                 >
                                     Load More
                                 </Button>
@@ -615,8 +716,7 @@ function processAttendanceByDay(attendanceData) {
                     isOpen={isFaceAttendanceOpen}
                     onClose={() => {
                         setIsFaceAttendanceOpen(false);
-                        // Refresh attendance data when face attendance is closed
-                        fetchAttendanceData();
+                        // Don't refresh all data, rely on real-time updates
                     }}
                 />
             </div>
