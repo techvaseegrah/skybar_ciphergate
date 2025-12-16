@@ -73,13 +73,19 @@ const putAttendance = async (req, res) => {
                     if (lastAttendance.date instanceof Date) {
                         lastPunchDateFormatted = indiaTimezoneDate.format(lastAttendance.date);
                     } else if (typeof lastAttendance.date === 'string') {
-                        // Try to parse the string as a date
-                        const parsedDate = new Date(lastAttendance.date);
-                        if (!isNaN(parsedDate.getTime())) {
-                            lastPunchDateFormatted = indiaTimezoneDate.format(parsedDate);
+                        // Check if it's already in YYYY-MM-DD format
+                        if (/^\d{4}-\d{2}-\d{2}/.test(lastAttendance.date)) {
+                            // Already in correct format, use as is
+                            lastPunchDateFormatted = lastAttendance.date.split('T')[0]; // Handle ISO strings with time
                         } else {
-                            // If parsing fails, use the string as is
-                            lastPunchDateFormatted = lastAttendance.date;
+                            // Try to parse the string as a date
+                            const parsedDate = new Date(lastAttendance.date);
+                            if (!isNaN(parsedDate.getTime())) {
+                                lastPunchDateFormatted = indiaTimezoneDate.format(parsedDate);
+                            } else {
+                                // If parsing fails, use the string as is
+                                lastPunchDateFormatted = lastAttendance.date;
+                            }
                         }
                     } else {
                         // For any other type, convert to string
@@ -129,6 +135,24 @@ const putAttendance = async (req, res) => {
             presence: newPresence,
             worker: worker._id
         });
+
+        // Emit real-time update to clients in the subdomain room
+        // We need to get the io instance from the server module
+        try {
+            const serverModule = require('../server');
+            if (serverModule.io) {
+                // Populate the attendance record before sending
+                const populatedAttendance = await Attendance.findById(newAttendance._id)
+                    .populate('worker')
+                    .populate('department');
+                
+                serverModule.io.to(`subdomain-${subdomain}`).emit('attendance-update', {
+                    attendance: populatedAttendance
+                });
+            }
+        } catch (ioError) {
+            console.warn('Could not emit socket event:', ioError);
+        }
 
         res.status(201).json({
             message: newPresence ? 'Attendance marked as in' : 'Attendance marked as out',
@@ -337,10 +361,71 @@ const getWorkerLastAttendance = async (req, res) => {
     }
 };
 
+// New function to get distinct dates for pagination
+const getAttendanceDates = async (req, res) => {
+    try {
+        const { subdomain } = req.body;
+
+        if (!subdomain || subdomain == 'main') {
+            res.status(401);
+            throw new Error('Company name is missing, login again');
+        }
+
+        // Get distinct dates and sort them in descending order manually
+        const distinctDates = await Attendance.distinct('date', { subdomain });
+        
+        // Sort dates manually in descending order
+        const dates = distinctDates.sort((a, b) => new Date(b) - new Date(a));
+
+        res.status(200).json({ 
+            message: 'Attendance dates retrieved successfully', 
+            dates
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// New function to get attendance by specific dates
+const getAttendanceByDates = async (req, res) => {
+    try {
+        const { subdomain, dates } = req.body;
+
+        if (!subdomain || subdomain == 'main') {
+            res.status(401);
+            throw new Error('Company name is missing, login again');
+        }
+
+        if (!dates || !Array.isArray(dates) || dates.length === 0) {
+            res.status(400);
+            throw new Error('Dates array is required');
+        }
+
+        const attendanceData = await Attendance.find({ 
+            subdomain, 
+            date: { $in: dates } 
+        })
+        .populate('worker')
+        .populate('department')
+        .sort({ date: -1, createdAt: -1 });
+
+        res.status(200).json({ 
+            message: 'Attendance data retrieved successfully', 
+            attendance: attendanceData
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
 module.exports = {
     putAttendance,
     putRfidAttendance,
     getAttendance,
     getWorkerAttendance,
-    getWorkerLastAttendance
+    getWorkerLastAttendance,
+    getAttendanceDates,
+    getAttendanceByDates
 };
