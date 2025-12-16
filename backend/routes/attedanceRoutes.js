@@ -6,7 +6,9 @@ const {
   getWorkerAttendance,
   putAttendance,
   putRfidAttendance,
-  getWorkerLastAttendance
+  getWorkerLastAttendance,
+  getAttendanceDates,
+  getAttendanceByDates
 } = require('../controllers/attendanceController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -16,6 +18,10 @@ router.post('/worker', protect, getWorkerAttendance);
 router.put('/', protect, putAttendance);
 router.put('/rfid', protect, putRfidAttendance);
 router.post('/worker-last', protect, getWorkerLastAttendance);
+
+// New routes for date-wise loading
+router.post('/dates', protect, getAttendanceDates);
+router.post('/by-dates', protect, getAttendanceByDates);
 
 // Note: Face recognition route has been removed as the controller function doesn't exist
 // router.post('/face-recognition', recognizeFaceAndMarkAttendance);
