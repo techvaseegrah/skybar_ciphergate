@@ -11,6 +11,10 @@ dotenv.config();
 // Connect to database
 connectDB();
 
+// Initialize Socket.IO
+const http = require('http');
+const socketIo = require('socket.io');
+
 // Routes
 const authRoutes = require('./routes/authRoutes');
 const attendanceRoutes = require('./routes/attedanceRoutes');
@@ -23,7 +27,7 @@ const salaryRoutes = require('./routes/salaryRoutes');
 const settingsRoutes = require('./routes/settingsRoutes');
 const holidayRoutes = require('./routes/holidayRoutes');
 const advanceRoutes = require('./routes/advanceRoutes');
-const salaryReportRoutes = require('./routes/salaryReportRoutes'); // New route
+const salaryReportRoutes = require('./routes/salaryReportRoutes');
 
 // Job routes
 const jobRoutes = require('./routes/jobRoutes');
@@ -76,7 +80,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/holidays', holidayRoutes);
 app.use('/api/advances', advanceRoutes);
-app.use('/api/salary-report', salaryReportRoutes); // New route
+app.use('/api/salary-report', salaryReportRoutes);
 
 // Job routes
 app.use('/api/jobs', jobRoutes);
@@ -100,8 +104,54 @@ if (process.env.NODE_ENV === 'production' || process.env.ENABLE_SCHEDULERS === '
 // Error handler (should be last)
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5002;  // Changed from 5001 to 5002
-app.listen(PORT, () => {
+const PORT = process.env.PORT || 5002;
+
+// Create HTTP server and attach Socket.IO
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: corsOptions
+});
+
+// Store connected clients by subdomain
+const connectedClients = {};
+
+// Handle Socket.IO connections
+io.on('connection', (socket) => {
+  console.log('New client connected:', socket.id);
+  
+  // Join a room based on subdomain
+  socket.on('join-subdomain', (subdomain) => {
+    if (subdomain && subdomain !== 'main') {
+      socket.join(`subdomain-${subdomain}`);
+      console.log(`Client ${socket.id} joined subdomain room: ${subdomain}`);
+      
+      // Track connected clients by subdomain
+      if (!connectedClients[subdomain]) {
+        connectedClients[subdomain] = [];
+      }
+      connectedClients[subdomain].push(socket.id);
+    }
+  });
+  
+  // Handle disconnections
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+    // Remove client from tracking
+    for (const subdomain in connectedClients) {
+      const index = connectedClients[subdomain].indexOf(socket.id);
+      if (index !== -1) {
+        connectedClients[subdomain].splice(index, 1);
+        break;
+      }
+    }
+  });
+});
+
+// Export io instance for use in other modules
+module.exports = { app, server, io };
+
+// Listen on the specified port
+server.listen(PORT, () => {
   console.log(`🌟 Server running on port ${PORT}`);
   console.log(`📧 Email service: ${process.env.EMAIL_USER ? 'Configured' : 'Not configured'}`);
   console.log(`🗄️ Database: ${process.env.MONGO_URI ? 'Connected' : 'Not configured'}`);
