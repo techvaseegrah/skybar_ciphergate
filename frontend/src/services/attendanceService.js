@@ -132,6 +132,42 @@ export const getAttendance = async (attendanceData) => {
     }
 };
 
+// New function to get attendance dates
+export const getAttendanceDates = async (attendanceData) => {
+    const token = getAuthToken();
+
+    try {
+        const response = await api.post('/attendance/dates', attendanceData, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Failed to get attendance dates:', error);
+        throw error.response?.data || new Error('Failed to get attendance dates');
+    }
+};
+
+// New function to get attendance by specific dates
+export const getAttendanceByDates = async (attendanceData) => {
+    const token = getAuthToken();
+
+    try {
+        const response = await api.post('/attendance/by-dates', attendanceData, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Failed to get attendance by dates:', error);
+        throw error.response?.data || new Error('Failed to get attendance by dates');
+    }
+};
+
 export const getWorkerAttendance = async (attendanceData) => {
     const token = getAuthToken();
 
@@ -167,11 +203,3 @@ export const getWorkerLastAttendance = async (rfid, subdomain) => {
     }
 };
 
-export default {
-    putAttendance,
-    putRfidAttendance,
-    getAttendance,
-    getWorkerAttendance,
-    recognizeFaceAndMarkAttendance,
-    getWorkerLastAttendance
-};
